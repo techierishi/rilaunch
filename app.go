@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"rilaunch/pkg/clipm"
+	"rilaunch/pkg/config"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -52,6 +54,27 @@ func (a *App) Greet(name string) string {
 
 func (a *App) RegisterHotKey() {
 	registerHotkey(a)
+}
+
+func (a *App) GetClipData(name string) string {
+
+	clipDb := config.GetInstance()
+
+	clipm := &clipm.ClipM{
+		DB: clipDb.DB,
+	}
+
+	clipList, err := clipm.ReadAll()
+	if err != nil {
+		fmt.Println("ReadAll", err)
+		return "[]"
+	}
+	clipm.SortByTimestamp(*clipList)
+	jsonClipList, err := json.Marshal(clipList)
+	if err != nil {
+		fmt.Println("Reverse", err)
+	}
+	return string(jsonClipList)
 }
 
 func registerHotkey(a *App) {

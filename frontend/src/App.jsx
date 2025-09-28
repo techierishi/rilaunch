@@ -109,8 +109,20 @@ function App() {
 
   createEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
+    EventsOn("Backend:GlobalHotkeyEvent", globalHotkeyEventHandler);
     return () => document.removeEventListener('keydown', handleKeyDown);
   });
+
+  function globalHotkeyEventHandler(time) {
+      window.runtime.WindowShow();
+
+      setTimeout(() => {
+        window.runtime.WindowHide();
+      }, 1000);
+  }
+
+
+
 
   return (
     <div class="app">

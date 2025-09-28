@@ -20,7 +20,7 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:  "pal",
+		Title:  "rilaunch",
 		Width:  700,
 		Height: 600,
 		Frameless:       true,
@@ -45,6 +45,7 @@ func main() {
 			app,
 		},
 	})
+
 
 	if err != nil {
 		println("Error:", err.Error())

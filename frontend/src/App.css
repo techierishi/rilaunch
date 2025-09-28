@@ -55,7 +55,7 @@
   color: #666;
 }
 
-/* Scrollbar styling */
+
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -73,12 +73,12 @@
   background: rgba(0, 0, 0, 0.3);
 }
 
-/* Focus styles */
+
 *:focus {
   outline: none;
 }
 
-/* Animation for smooth transitions */
+
 .main-container {
   animation: slideIn 0.2s ease-out;
 }
@@ -94,7 +94,7 @@
   }
 }
 
-/* Clipboard view styles */
+
 .clipboard-view {
   flex: 1;
   display: flex;
@@ -217,7 +217,7 @@
   color: #333;
 }
 
-/* Hotkey hint */
+
 .hotkey-hint {
   padding: 12px 20px;
   background: rgba(0, 123, 255, 0.1);

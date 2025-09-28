@@ -110,12 +110,9 @@
   color: #3b82f6;
 }
 
-/* Smooth scrolling */
 .command-list-scroll {
   scroll-behavior: smooth;
 }
-
-/* Custom scrollbar for command list */
 .command-list-scroll::-webkit-scrollbar {
   width: 4px;
 }
@@ -133,7 +130,7 @@
   background: rgba(0, 0, 0, 0.25);
 }
 
-/* Animation for command items */
+
 .command-item {
   animation: slideInLeft 0.2s ease-out;
   animation-fill-mode: both;
@@ -159,7 +156,7 @@
   }
 }
 
-/* Responsive adjustments */
+
 @media (max-width: 768px) {
   .command-item {
     padding: 10px 16px;

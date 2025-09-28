@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"rilaunch/pkg/appm"
 	"rilaunch/pkg/clipm"
 	"rilaunch/pkg/config"
 	"time"
@@ -14,26 +15,25 @@ import (
 	"golang.design/x/hotkey"
 )
 
-// App struct
 type App struct {
 	ctx context.Context
 	refreshCh    chan bool
 	isVisible    bool
 	clipData     []clipm.ClipInfo
 	filteredData []clipm.ClipInfo
+	appManager   *appm.Manager
 }
 
-// NewApp creates a new App application struct
+
 func NewApp() *App {
-	return &App{}
+	return &App{
+		appManager: appm.NewManager(),
+	}
 }
 
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods
+
 func (a *App) startup(ctx context.Context) {
-	// go func() {
-	// 		systray.Run(a.onReady, a.onExit)
-	// 	}()
+
 	a.ctx = ctx
 
 	wails_runtime.EventsOn(ctx, "menu_quit", func(optionalData ...interface{}) {
@@ -41,13 +41,19 @@ func (a *App) startup(ctx context.Context) {
 	})
 
 	go clipm.Record(ctx)
-	// register hotkey on the app startup
-	// if you try to register it anywhere earlier - the app will hang on compile step
-	// mainthread.Init(a.RegisterHotKey)
+
+
+	go func() {
+		if err := a.appManager.Initialize(); err != nil {
+			fmt.Printf("Failed to initialize application manager: %v\n", err)
+		}
+	}()
+
+
 	a.RegisterHotKey()
 }
 
-// Greet returns a greeting for the given name
+
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
@@ -77,6 +83,36 @@ func (a *App) GetClipData(name string) string {
 	return string(jsonClipList)
 }
 
+func (a *App) GetAllApps() string {
+	apps, err := a.appManager.GetAllApps()
+	if err != nil {
+		fmt.Printf("GetAllApps error: %v\n", err)
+		return "[]"
+	}
+	return apps
+}
+
+func (a *App) SearchApps(query string) string {
+	apps, err := a.appManager.SearchApps(query)
+	if err != nil {
+		fmt.Printf("SearchApps error: %v\n", err)
+		return "[]"
+	}
+	return apps
+}
+
+func (a *App) LaunchApp(appID string) error {
+	err := a.appManager.LaunchApp(appID)
+	if err != nil {
+		fmt.Printf("LaunchApp error: %v\n", err)
+		return err
+	}
+
+
+	a.hideWindow()
+	return nil
+}
+
 func registerHotkey(a *App) {
 	hk := hotkey.New([]hotkey.Modifier{hotkey.ModShift}, hotkey.KeySpace)
 	err := hk.Register()
@@ -100,7 +136,7 @@ func registerHotkey(a *App) {
 				} else {
 					a.showWindow()
 				}
-			// Refresh clip data when hotkey is pressed
+
 			select {
 			case a.refreshCh <- true:
 			default:

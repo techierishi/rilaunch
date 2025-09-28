@@ -1,6 +1,6 @@
 import { createSignal, createEffect, For } from 'solid-js';
-import { GetClipData } from '../wailsjs/go/main/App';
-import { EventsOn, WindowHide, WindowShow } from '../wailsjs/runtime/runtime';
+import { GetClipData, GetAllApps, SearchApps, LaunchApp } from '../wailsjs/go/main/App';
+import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
 import CommandList from './components/CommandList';
 import CommandPreview from './components/CommandPreview';
@@ -12,10 +12,12 @@ function App() {
   const [clipboardData, setClipboardData] = createSignal([]);
   const [showClipboard, setShowClipboard] = createSignal(false);
   const [clipboardSelectedIndex, setClipboardSelectedIndex] = createSignal(0);
+  const [apps, setApps] = createSignal([]);
+  const [filteredApps, setFilteredApps] = createSignal([]);
   const [commands] = createSignal([
     {
       id: 1,
-      title: 'Open Calculator',
+      title: 'Open Application',
       subtitle: 'Perform calculations',
       icon: '🧮',
       category: 'System'
@@ -26,44 +28,8 @@ function App() {
       subtitle: 'Find files on your system',
       icon: '📁',
       category: 'File System'
-    },
-    {
+    },  {
       id: 3,
-      title: 'System Preferences',
-      subtitle: 'Change system settings',
-      icon: '⚙️',
-      category: 'System'
-    },
-    {
-      id: 4,
-      title: 'Take Screenshot',
-      subtitle: 'Capture your screen',
-      icon: '📸',
-      category: 'Utilities'
-    },
-    {
-      id: 5,
-      title: 'Open Terminal',
-      subtitle: 'Access command line',
-      icon: '💻',
-      category: 'Development'
-    },
-    {
-      id: 6,
-      title: 'Calendar',
-      subtitle: 'View your schedule',
-      icon: '📅',
-      category: 'Productivity'
-    },
-    {
-      id: 7,
-      title: 'Weather',
-      subtitle: 'Check current weather',
-      icon: '🌤️',
-      category: 'Information'
-    },
-    {
-      id: 8,
       title: 'Clipboard History',
       subtitle: 'View copied items',
       icon: '📋',
@@ -72,15 +38,12 @@ function App() {
   ]);
 
   const filteredCommands = () => {
-    if (!searchQuery()) return commands();
-    return commands().filter(command =>
-      command.title.toLowerCase().includes(searchQuery().toLowerCase()) ||
-      command.subtitle.toLowerCase().includes(searchQuery().toLowerCase()) ||
-      command.category.toLowerCase().includes(searchQuery().toLowerCase())
-    );
+    if (!searchQuery()) return filteredApps();
+    if (searchQuery().startsWith('c ')) return [];
+    return filteredApps();
   };
 
-  // Check if search query triggers clipboard view
+
   const checkClipboardTrigger = async (query) => {
     if (query.startsWith('c ')) {
       if (!showClipboard()) {
@@ -97,6 +60,39 @@ function App() {
     } else if (showClipboard() && !query.startsWith('c ')) {
       setShowClipboard(false);
     }
+
+
+    if (!query.startsWith('c ')) {
+      await searchApplications(query);
+    }
+  };
+
+
+  const searchApplications = async (query) => {
+    try {
+      let appsData;
+      if (query.trim() === '') {
+        appsData = await GetAllApps();
+      } else {
+        appsData = await SearchApps(query);
+      }
+      const parsedApps = JSON.parse(appsData);
+
+
+      const appCommands = parsedApps.map(app => ({
+        id: app.id,
+        title: app.displayName || app.name,
+        subtitle: app.description || 'Application',
+        icon: app.icon || '🖥️',
+        category: app.category || 'Application',
+        appData: app
+      }));
+
+      setFilteredApps(appCommands);
+    } catch (error) {
+      console.error('Error searching applications:', error);
+      setFilteredApps([]);
+    }
   };
 
   // Filter clipboard data based on search after 'c '
@@ -112,12 +108,25 @@ function App() {
     });
   };
 
+  const handleAppLaunch = async (command) => {
+    if (command && command.appData) {
+      try {
+        await LaunchApp(command.appData.id);
+      } catch (error) {
+        console.error('Error launching app:', error);
+      }
+    }
+  };
+
   const handleKeyDown = async (e) => {
-    // Handle Escape to close clipboard view
     if (e.key === 'Escape') {
       if (showClipboard()) {
         setShowClipboard(false);
         setSearchQuery('');
+        return;
+      }
+      if (searchQuery() === '') {
+        Quit();
         return;
       }
       setSearchQuery('');
@@ -142,10 +151,8 @@ function App() {
           e.preventDefault();
           const selected = filteredClip[clipboardSelectedIndex()];
           if (selected) {
-            // Copy selected item to clipboard and close window
             navigator.clipboard.writeText(selected.content || selected.text || '');
             console.log('Copied to clipboard:', selected.content || selected.text);
-            // Close the window
             WindowHide();
           }
           break;
@@ -167,20 +174,19 @@ function App() {
       case 'Enter':
         e.preventDefault();
         const selected = filtered[selectedIndex()];
-        if (selected) {
-          console.log('Execute command:', selected.title);
-          // Here you would typically execute the command
-        }
+        await handleAppLaunch(selected);
         break;
     }
   };
 
   createEffect(() => {
-    // Reset selection when search changes
     setSelectedIndex(0);
     setClipboardSelectedIndex(0);
-    // Check for clipboard trigger
     checkClipboardTrigger(searchQuery());
+  });
+
+  createEffect(() => {
+    searchApplications('');
   });
 
   createEffect(() => {
@@ -191,21 +197,12 @@ function App() {
 
   function globalHotkeyEventHandler(time) {
       WindowShow();
-
-      setTimeout(() => {
-        WindowHide();
-      }, 1000);
   }
 
-
-
-
   const handleClipboardItemClick = (item) => {
-    // Copy selected item to clipboard and close window
     navigator.clipboard.writeText(item.content || item.text || '');
     console.log('Copied to clipboard:', item.content || item.text);
-    // Close the window
-    WindowHide();
+    Quit();
   };
 
   return (
@@ -261,9 +258,7 @@ function App() {
                 commands={filteredCommands()}
                 selectedIndex={selectedIndex()}
                 onSelect={setSelectedIndex}
-              />
-              <CommandPreview
-                command={filteredCommands()[selectedIndex()]}
+                onLaunch={handleAppLaunch}
               />
             </div>
             {filteredCommands().length === 0 && (
@@ -274,7 +269,7 @@ function App() {
               </div>
             )}
             <div class="hotkey-hint">
-              <span>💡 Type "c " in search to view clipboard history • Continue typing to filter</span>
+              <span>💡 Type to search applications • Type "c " for clipboard history • Enter or double-click to launch • Escape to quit</span>
             </div>
           </>
         )}

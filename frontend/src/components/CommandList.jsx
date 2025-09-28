@@ -1,9 +1,15 @@
 import { For } from 'solid-js';
 import './CommandList.css';
 
-function CommandList({ commands, selectedIndex, onSelect }) {
+function CommandList({ commands, selectedIndex, onSelect, onLaunch }) {
   const handleClick = (index) => {
     onSelect(index);
+  };
+
+  const handleDoubleClick = (command) => {
+    if (onLaunch) {
+      onLaunch(command);
+    }
   };
 
   const handleMouseEnter = (index) => {
@@ -18,6 +24,7 @@ function CommandList({ commands, selectedIndex, onSelect }) {
             <div
               class={`command-item ${index() === selectedIndex ? 'selected' : ''}`}
               onClick={() => handleClick(index())}
+              onDoubleClick={() => handleDoubleClick(command)}
               onMouseEnter={() => handleMouseEnter(index())}
             >
               <div class="command-icon">

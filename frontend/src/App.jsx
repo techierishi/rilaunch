@@ -1,9 +1,10 @@
 import { createSignal, createEffect, For } from 'solid-js';
-import { GetClipData, GetAllApps, SearchApps, LaunchApp } from '../wailsjs/go/main/App';
+import { GetClipData, GetAllApps, SearchApps, LaunchApp, ExecuteCommand, GetLastCommand, GetLastOutput } from '../wailsjs/go/main/App';
 import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
 import ClipboardView from './components/ClipboardView';
 import ApplicationView from './components/ApplicationView';
+import CommandExecutor from './components/CommandExecutor';
 import './App.css';
 
 function App() {
@@ -14,13 +15,18 @@ function App() {
   const [clipboardSelectedIndex, setClipboardSelectedIndex] = createSignal(0);
   const [apps, setApps] = createSignal([]);
   const [filteredApps, setFilteredApps] = createSignal([]);
+  const [showCommandExecutor, setShowCommandExecutor] = createSignal(false);
+  const [currentCommand, setCurrentCommand] = createSignal('');
+  const [commandOutput, setCommandOutput] = createSignal('');
+  const [isExecuting, setIsExecuting] = createSignal(false);
 
 
 
 
 
-  const checkClipboardTrigger = async (query) => {
+  const checkTriggers = async (query) => {
     if (query.startsWith('c ')) {
+      setShowCommandExecutor(false);
       if (!showClipboard()) {
         try {
           const clipData = await GetClipData('');
@@ -32,12 +38,15 @@ function App() {
           console.error('Error fetching clipboard data:', error);
         }
       }
-    } else if (showClipboard() && !query.startsWith('c ')) {
+    } else if (query.startsWith('e ')) {
       setShowClipboard(false);
-    }
-
-
-    if (!query.startsWith('a ')) {
+      if (!showCommandExecutor()) {
+        setShowCommandExecutor(true);
+        loadLastCommand();
+      }
+    } else {
+      setShowClipboard(false);
+      setShowCommandExecutor(false);
       await searchApplications(query);
     }
   };
@@ -81,6 +90,33 @@ function App() {
     });
   };
 
+  const loadLastCommand = async () => {
+    try {
+      const lastCmd = await GetLastCommand();
+      const lastOut = await GetLastOutput();
+      if (lastCmd) {
+        setCurrentCommand(lastCmd);
+        setCommandOutput(lastOut || '');
+      }
+    } catch (error) {
+      console.error('Error loading last command:', error);
+    }
+  };
+
+  const handleCommandExecute = async (command) => {
+    setIsExecuting(true);
+    try {
+      const output = await ExecuteCommand(command);
+      setCurrentCommand(command);
+      setCommandOutput(output);
+    } catch (error) {
+      console.error('Error executing command:', error);
+      setCommandOutput(`Error: ${error.message}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
   const handleAppLaunch = async (command) => {
     if (command && command.appData) {
       try {
@@ -95,6 +131,11 @@ function App() {
     if (e.key === 'Escape') {
       if (showClipboard()) {
         setShowClipboard(false);
+        setSearchQuery('');
+        return;
+      }
+      if (showCommandExecutor()) {
+        setShowCommandExecutor(false);
         setSearchQuery('');
         return;
       }
@@ -131,6 +172,10 @@ function App() {
       return;
     }
 
+    if (showCommandExecutor()) {
+      return;
+    }
+
     const filtered = filteredApps();
 
     switch (e.key) {
@@ -153,7 +198,7 @@ function App() {
   createEffect(() => {
     setSelectedIndex(0);
     setClipboardSelectedIndex(0);
-    checkClipboardTrigger(searchQuery());
+    checkTriggers(searchQuery());
   });
 
   createEffect(() => {
@@ -191,6 +236,15 @@ function App() {
               onItemClick={handleClipboardItemClick}
             />
           </div>
+        ) : showCommandExecutor() ? (
+          <div class="content-area">
+            <CommandExecutor
+              output={() => commandOutput()}
+              isLoading={isExecuting()}
+              onExecute={handleCommandExecute}
+              lastExecutedCommand={currentCommand()}
+            />
+          </div>
         ) : (
           <>
             <ApplicationView
@@ -200,7 +254,7 @@ function App() {
               onLaunch={handleAppLaunch}
             />
             <div class="hotkey-hint">
-              <span>💡 Type to search applications • Type "c " for clipboard history • Enter or double-click to launch • Escape to quit</span>
+              <span>💡 Type to search applications • Type "c " for clipboard • Type "e " for commands • Escape to quit</span>
             </div>
           </>
         )}

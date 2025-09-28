@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"rilaunch/pkg/appm"
 	"rilaunch/pkg/clipm"
 	"rilaunch/pkg/config"
+	"strings"
 	"time"
 
-	"github.com/getlantern/systray"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	wails_runtime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.design/x/hotkey"
@@ -22,6 +23,8 @@ type App struct {
 	clipData     []clipm.ClipInfo
 	filteredData []clipm.ClipInfo
 	appManager   *appm.Manager
+	lastCommand  string
+	lastOutput   string
 }
 
 
@@ -113,8 +116,40 @@ func (a *App) LaunchApp(appID string) error {
 	return nil
 }
 
+func (a *App) ExecuteCommand(command string) string {
+	if strings.TrimSpace(command) == "" {
+		return "Error: Empty command"
+	}
+
+	a.lastCommand = command
+
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return "Error: Invalid command"
+	}
+
+	cmd := exec.Command(parts[0], parts[1:]...)
+	output, err := cmd.CombinedOutput()
+
+	result := string(output)
+	if err != nil {
+		result = fmt.Sprintf("Error: %v\n%s", err, result)
+	}
+
+	a.lastOutput = result
+	return result
+}
+
+func (a *App) GetLastCommand() string {
+	return a.lastCommand
+}
+
+func (a *App) GetLastOutput() string {
+	return a.lastOutput
+}
+
 func registerHotkey(a *App) {
-	hk := hotkey.New([]hotkey.Modifier{hotkey.ModShift}, hotkey.KeySpace)
+	hk := hotkey.New([]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModShift}, hotkey.KeySpace)
 	err := hk.Register()
 	if err != nil {
 		fmt.Printf("Failed to register hotkey: %v\n", err)
@@ -157,25 +192,4 @@ func (a *App) hideWindow() {
 	runtime.EventsEmit(a.ctx, "Backend:GlobalHotkeyEvent", time.Now().String())
 }
 
-
-func (a *App)  onReady() {
-	systray.SetTitle("Tray App")
-	systray.SetTooltip("Running in tray")
-
-	mShow := systray.AddMenuItem("Show Window", "Open the main window")
-	mQuit := systray.AddMenuItem("Quit", "Exit the app")
-
-	go func() {
-		for {
-			select {
-			case <-mShow.ClickedCh:
-				// Show main window
-				runtime.WindowShow(a.ctx)
-			case <-mQuit.ClickedCh:
-				systray.Quit()
-				runtime.Quit(a.ctx)
-			}
-		}
-	}()
-}
 func (a *App) onExit() {}

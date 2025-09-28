@@ -2,8 +2,8 @@ import { createSignal, createEffect, For } from 'solid-js';
 import { GetClipData, GetAllApps, SearchApps, LaunchApp } from '../wailsjs/go/main/App';
 import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
-import CommandList from './components/CommandList';
-import CommandPreview from './components/CommandPreview';
+import ClipboardView from './components/ClipboardView';
+import ApplicationView from './components/ApplicationView';
 import './App.css';
 
 function App() {
@@ -14,34 +14,9 @@ function App() {
   const [clipboardSelectedIndex, setClipboardSelectedIndex] = createSignal(0);
   const [apps, setApps] = createSignal([]);
   const [filteredApps, setFilteredApps] = createSignal([]);
-  const [commands] = createSignal([
-    {
-      id: 1,
-      title: 'Open Application',
-      subtitle: 'Perform calculations',
-      icon: '🧮',
-      category: 'System'
-    },
-    {
-      id: 2,
-      title: 'Search Files',
-      subtitle: 'Find files on your system',
-      icon: '📁',
-      category: 'File System'
-    },  {
-      id: 3,
-      title: 'Clipboard History',
-      subtitle: 'View copied items',
-      icon: '📋',
-      category: 'Utilities'
-    }
-  ]);
 
-  const filteredCommands = () => {
-    if (!searchQuery()) return filteredApps();
-    if (searchQuery().startsWith('c ')) return [];
-    return filteredApps();
-  };
+
+
 
 
   const checkClipboardTrigger = async (query) => {
@@ -62,7 +37,7 @@ function App() {
     }
 
 
-    if (!query.startsWith('c ')) {
+    if (!query.startsWith('a ')) {
       await searchApplications(query);
     }
   };
@@ -77,7 +52,6 @@ function App() {
         appsData = await SearchApps(query);
       }
       const parsedApps = JSON.parse(appsData);
-
 
       const appCommands = parsedApps.map(app => ({
         id: app.id,
@@ -95,7 +69,6 @@ function App() {
     }
   };
 
-  // Filter clipboard data based on search after 'c '
   const filteredClipboardData = () => {
     if (!showClipboard()) return [];
 
@@ -134,7 +107,6 @@ function App() {
       return;
     }
 
-    // Handle keyboard navigation for clipboard view
     if (showClipboard()) {
       const filteredClip = filteredClipboardData();
 
@@ -152,7 +124,6 @@ function App() {
           const selected = filteredClip[clipboardSelectedIndex()];
           if (selected) {
             navigator.clipboard.writeText(selected.content || selected.text || '');
-            console.log('Copied to clipboard:', selected.content || selected.text);
             WindowHide();
           }
           break;
@@ -160,7 +131,7 @@ function App() {
       return;
     }
 
-    const filtered = filteredCommands();
+    const filtered = filteredApps();
 
     switch (e.key) {
       case 'ArrowDown':
@@ -201,8 +172,7 @@ function App() {
 
   const handleClipboardItemClick = (item) => {
     navigator.clipboard.writeText(item.content || item.text || '');
-    console.log('Copied to clipboard:', item.content || item.text);
-    Quit();
+    WindowHide();
   };
 
   return (
@@ -214,60 +184,21 @@ function App() {
         />
         {showClipboard() ? (
           <div class="content-area">
-            <div class="clipboard-view">
-              <div class="clipboard-header">
-                <h2>📋 Clipboard History</h2>
-                <p class="clipboard-hint">Click item to copy & close • Arrow keys to navigate • Enter to copy & close</p>
-              </div>
-              <div class="clipboard-list">
-                <For each={filteredClipboardData()}>
-                  {(item, index) => (
-                    <div
-                      class={`clipboard-item ${index() === clipboardSelectedIndex() ? 'selected' : ''}`}
-                      onClick={() => handleClipboardItemClick(item)}
-                    >
-                      <div class="clipboard-content">
-                        <div class="clipboard-text">{item.content || item.text || 'No content'}</div>
-                        <div class="clipboard-meta">
-                          <span class="clipboard-type">{item.type || 'text'}</span>
-                          <span class="clipboard-time">{item.timestamp ? new Date(item.timestamp * 1000).toLocaleString() : 'Unknown time'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </For>
-                {filteredClipboardData().length === 0 && clipboardData().length > 0 && (
-                  <div class="no-clipboard-data">
-                    <div class="no-clipboard-icon">🔍</div>
-                    <div class="no-clipboard-text">No matching clipboard items</div>
-                  </div>
-                )}
-                {clipboardData().length === 0 && (
-                  <div class="no-clipboard-data">
-                    <div class="no-clipboard-icon">📋</div>
-                    <div class="no-clipboard-text">No clipboard data found</div>
-                  </div>
-                )}
-              </div>
-            </div>
+            <ClipboardView
+              clipboardData={clipboardData()}
+              filteredClipboardData={filteredClipboardData()}
+              clipboardSelectedIndex={clipboardSelectedIndex()}
+              onItemClick={handleClipboardItemClick}
+            />
           </div>
         ) : (
           <>
-            <div class="content-area">
-              <CommandList
-                commands={filteredCommands()}
-                selectedIndex={selectedIndex()}
-                onSelect={setSelectedIndex}
-                onLaunch={handleAppLaunch}
-              />
-            </div>
-            {filteredCommands().length === 0 && (
-              <div class="no-results">
-                <div class="no-results-icon">🔍</div>
-                <div class="no-results-text">No commands found</div>
-                <div class="no-results-subtitle">Try a different search term</div>
-              </div>
-            )}
+            <ApplicationView
+              apps={filteredApps()}
+              selectedIndex={selectedIndex()}
+              onSelect={setSelectedIndex}
+              onLaunch={handleAppLaunch}
+            />
             <div class="hotkey-hint">
               <span>💡 Type to search applications • Type "c " for clipboard history • Enter or double-click to launch • Escape to quit</span>
             </div>

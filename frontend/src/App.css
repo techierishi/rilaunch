@@ -76,6 +76,10 @@
   background: rgba(59, 130, 246, 0.1);
 }
 
+.sidebar-spacer { flex: 1; }
+
+.settings-btn { color: #b0b0c0; }
+
 /* ── Content panel ────────────────────────────────────────────────────────── */
 .content-panel {
   flex: 1;
@@ -83,6 +87,7 @@
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  position: relative;
 }
 
 /* ── Empty state ──────────────────────────────────────────────────────────── */

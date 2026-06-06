@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -113,4 +114,44 @@ func Touch(fileName string) error {
 		defer file.Close()
 	}
 	return nil
+}
+
+// ── App Settings ──────────────────────────────────────────────────────────────
+
+// Settings holds user-configurable app preferences, persisted to settings.json.
+type Settings struct {
+	NotesDir string `json:"notesDir"`
+}
+
+func settingsFilePath() string {
+	dir, _ := GetDefaultConfigDir()
+	return filepath.Join(dir, "settings.json")
+}
+
+// LoadSettings reads settings.json, falling back to defaults.
+func LoadSettings() *Settings {
+	dir, _ := GetDefaultConfigDir()
+	s := &Settings{
+		NotesDir: filepath.Join(dir, "notes"),
+	}
+	data, err := os.ReadFile(settingsFilePath())
+	if err != nil {
+		return s
+	}
+	if err := json.Unmarshal(data, s); err != nil {
+		return s
+	}
+	if s.NotesDir == "" {
+		s.NotesDir = filepath.Join(dir, "notes")
+	}
+	return s
+}
+
+// SaveSettings persists settings to settings.json.
+func SaveSettings(s *Settings) error {
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(settingsFilePath(), data, 0o600)
 }

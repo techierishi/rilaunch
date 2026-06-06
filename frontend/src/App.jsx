@@ -1,12 +1,13 @@
 import { createSignal, createEffect, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import Fuse from 'fuse.js';
-import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetNotes, SaveNote, DeleteNote } from '../wailsjs/go/main/App';
+import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetNotes, SaveNote, DeleteNote, UpdateNote } from '../wailsjs/go/main/App';
 import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
 import ClipboardView from './components/ClipboardView';
 import ApplicationView from './components/ApplicationView';
 import CommandExecutor from './components/CommandExecutor';
 import NotesView from './components/NotesView';
+import SettingsView from './components/SettingsView';
 import './App.css';
 
 // ── Flat SVG icons ────────────────────────────────────────────────────────────
@@ -42,6 +43,13 @@ const IconNotes = () => (
   </svg>
 );
 
+const IconSettings = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="7" cy="7" r="2"/>
+    <path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.93 2.93l1.06 1.06M10.01 10.01l1.06 1.06M2.93 11.07l1.06-1.06M10.01 3.99l1.06-1.06"/>
+  </svg>
+);
+
 // ── Shell history helpers ─────────────────────────────────────────────────────
 
 const SHELL_HISTORY_KEY = 'rilaunch_shell_history';
@@ -73,6 +81,7 @@ function App() {
   const [notesList, setNotesList] = createSignal([]);
   const [shellHistory, setShellHistory] = createSignal(loadShellHistory());
   const [shellHistoryIndex, setShellHistoryIndex] = createSignal(-1);
+  const [showSettings, setShowSettings] = createSignal(false);
 
   let searchInputRef;
 
@@ -205,6 +214,11 @@ function App() {
 
   const handleDeleteNote = async (id) => {
     try { await DeleteNote(id); await loadNotes(); }
+    catch (e) { console.error(e); }
+  };
+
+  const handleUpdateNote = async (id, content, tag) => {
+    try { await UpdateNote(id, content, tag); await loadNotes(); }
     catch (e) { console.error(e); }
   };
 
@@ -348,9 +362,14 @@ function App() {
             <button class={"tab-btn" + (activeTab() === 'clipboard' ? ' active' : '')} onClick={() => switchTab('clipboard')} title="Clipboard ⌘2"><IconClipboard /></button>
             <button class={"tab-btn" + (activeTab() === 'notes'     ? ' active' : '')} onClick={() => switchTab('notes')}     title="Notes ⌘3"><IconNotes /></button>
             <button class={"tab-btn" + (activeTab() === 'shell'     ? ' active' : '')} onClick={() => switchTab('shell')}     title="Shell ⌘4"><IconTerminal /></button>
+            <div class="sidebar-spacer" />
+            <button class={"tab-btn settings-btn" + (showSettings() ? ' active' : '')} onClick={() => setShowSettings(s => !s)} title="Settings"><IconSettings /></button>
           </div>
 
           <div class="content-panel">
+            <Show when={showSettings()}>
+              <SettingsView onClose={() => setShowSettings(false)} />
+            </Show>
             <Show when={activeTab() === 'apps'}>
               <ApplicationView
                 apps={filteredApps()}
@@ -377,7 +396,9 @@ function App() {
               <NotesView
                 notes={filteredNotes()}
                 onSave={handleSaveNote}
+                onUpdate={handleUpdateNote}
                 onDelete={handleDeleteNote}
+                onReload={loadNotes}
               />
             </Show>
           </div>

@@ -15,6 +15,7 @@ import (
 	"rilaunch/pkg/notes"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"time"
 
 	wails_runtime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -32,6 +33,7 @@ type App struct {
 	lastOutput   string
 	notesStore   *notes.NotesStore
 	iconCache    map[string]string
+	iconMu       sync.RWMutex
 }
 
 func NewApp() *App {
@@ -57,11 +59,11 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 
-	// Initialize notes store
-	cfg := config.GetInstance()
-	a.notesStore = &notes.NotesStore{DB: cfg.DB}
-	if err := a.notesStore.EnsureBucket(); err != nil {
-		fmt.Printf("Failed to init notes store: %v\n", err)
+	// Initialize file-based notes store
+	settings := config.LoadSettings()
+	a.notesStore = &notes.NotesStore{Dir: settings.NotesDir}
+	if err := a.notesStore.EnsureDir(); err != nil {
+		fmt.Printf("Failed to init notes dir: %v\n", err)
 	}
 
 	a.RegisterHotKey()
@@ -237,14 +239,54 @@ func (a *App) DeleteNote(id string) error {
 	return a.notesStore.Delete(id)
 }
 
+func (a *App) UpdateNote(id, content, tag string) string {
+	note, err := a.notesStore.Update(id, content, tag)
+	if err != nil {
+		return `{"error":"` + err.Error() + `"}`
+	}
+	data, _ := json.Marshal(note)
+	return string(data)
+}
+
+func (a *App) GetNotesDir() string {
+	return a.notesStore.Dir
+}
+
+// ChooseNotesDir opens a native folder picker, saves the choice, and returns the new path.
+func (a *App) ChooseNotesDir() string {
+	newDir, err := wails_runtime.OpenDirectoryDialog(a.ctx, wails_runtime.OpenDialogOptions{
+		Title:                "Select Notes Folder",
+		DefaultDirectory:     a.notesStore.Dir,
+		CanCreateDirectories: true,
+	})
+	if err != nil || newDir == "" {
+		return a.notesStore.Dir // cancelled or error
+	}
+	settings := config.LoadSettings()
+	settings.NotesDir = newDir
+	config.SaveSettings(settings)
+	a.notesStore.Dir = newDir
+	return newDir
+}
+
 // ── App Icons ─────────────────────────────────────────────────────────────────
 
 func (a *App) GetAppIcon(appPath string) string {
-	if cached, ok := a.iconCache[appPath]; ok {
+	// Fast path: check cache under read lock
+	a.iconMu.RLock()
+	cached, ok := a.iconCache[appPath]
+	a.iconMu.RUnlock()
+	if ok {
 		return cached
 	}
+
+	// Slow path: extract icon, then store under write lock
 	icon := extractMacOSIconBase64(appPath)
+
+	a.iconMu.Lock()
 	a.iconCache[appPath] = icon
+	a.iconMu.Unlock()
+
 	return icon
 }
 

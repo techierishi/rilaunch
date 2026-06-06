@@ -1,35 +1,23 @@
-import { For } from 'solid-js';
 import CommandList from './CommandList';
-import CommandPreview from './CommandPreview';
 
-function ApplicationView({
-  apps,
-  selectedIndex,
-  onSelect,
-  onLaunch
-}) {
-  console.log("apps ", apps)
-  return (
-    <>
-      <div class="content-area">
-        <CommandList
-          commands={apps}
-          selectedIndex={selectedIndex}
-          onSelect={onSelect}
-          onLaunch={onLaunch}
-        />
-        <CommandPreview
-          command={apps[selectedIndex]}
-        />
+function ApplicationView({ apps, selectedIndex, onSelect, onLaunch }) {
+  if (apps.length === 0) {
+    return (
+      <div class="empty-state">
+        <div class="empty-icon">⊘</div>
+        <div class="empty-text">No applications found</div>
+        <div class="empty-sub">Try a different search term</div>
       </div>
-      {apps.length === 0 && (
-        <div class="no-results">
-          <div class="no-results-icon">🔍</div>
-          <div class="no-results-text">No applications found</div>
-          <div class="no-results-subtitle">Try a different search term</div>
-        </div>
-      )}
-    </>
+    );
+  }
+
+  return (
+    <CommandList
+      commands={apps}
+      selectedIndex={selectedIndex}
+      onSelect={onSelect}
+      onLaunch={onLaunch}
+    />
   );
 }
 

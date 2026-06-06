@@ -20,32 +20,27 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:  "rilaunch",
-		Width:  700,
-		Height: 600,
-		Frameless:       true,
+		Title:     "rilaunch",
+		Width:     700,
+		Height:    600,
+		Frameless: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		DisableResize:    true,
-		Linux: &linux.Options{
-			WindowIsTranslucent: true,
-		},
-			Mac: &mac.Options{
+		DisableResize: true,
+		Linux:         &linux.Options{},
+		Mac: &mac.Options{
 			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
 		},
 		Windows: &windows.Options{
-      WebviewIsTransparent: true,
-      WindowIsTranslucent: true,
-    },
+			WebviewIsTransparent: true,
+		},
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
 		OnStartup:        app.startup,
 		Bind: []interface{}{
 			app,
 		},
 	})
-
 
 	if err != nil {
 		println("Error:", err.Error())

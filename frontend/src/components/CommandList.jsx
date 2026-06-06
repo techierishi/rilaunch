@@ -1,15 +1,45 @@
-import { For } from 'solid-js';
+import { For, createResource, Show } from 'solid-js';
+import { GetAppIcon } from '../../wailsjs/go/main/App';
 import './CommandList.css';
 
-function CommandList({ commands, selectedIndex, onSelect, onLaunch }) {
-  const handleClick = (index) => {
-    onSelect(index);
-  };
+// Deterministic color from string
+function nameToColor(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash) % 360;
+  return `hsl(${h}, 50%, 52%)`;
+}
 
-  const handleDoubleClick = (command) => {
-    if (onLaunch) {
-      onLaunch(command);
-    }
+// Lazy-loading app icon with letter avatar fallback
+function AppIcon({ appPath, name }) {
+  const [iconSrc] = createResource(
+    () => appPath,
+    (path) => path ? GetAppIcon(path) : Promise.resolve('')
+  );
+
+  return (
+    <Show
+      when={iconSrc() && iconSrc().startsWith('data:')}
+      fallback={
+        <div
+          class="app-letter-icon"
+          style={{ background: nameToColor(name || '?') }}
+        >
+          {(name || '?')[0].toUpperCase()}
+        </div>
+      }
+    >
+      <img src={iconSrc()} class="app-real-icon" alt="" />
+    </Show>
+  );
+}
+
+function CommandList({ commands, selectedIndex, onSelect, onLaunch }) {
+  const handleClick = (command, index) => {
+    onSelect(index);
+    if (onLaunch) onLaunch(command);
   };
 
   const handleMouseEnter = (index) => {
@@ -22,25 +52,21 @@ function CommandList({ commands, selectedIndex, onSelect, onLaunch }) {
         <For each={commands}>
           {(command, index) => (
             <div
-              class={`command-item ${index() === selectedIndex ? 'selected' : ''}`}
-              onClick={() => handleClick(index())}
-              onDoubleClick={() => handleDoubleClick(command)}
+              class={"command-item" + (index() === selectedIndex ? ' selected' : '')}
+              onClick={() => handleClick(command, index())}
               onMouseEnter={() => handleMouseEnter(index())}
             >
               <div class="command-icon">
-                {command.icon}
+                <AppIcon
+                  appPath={command.appData?.path || command.appData?.Path || ''}
+                  name={command.title}
+                />
               </div>
               <div class="command-content">
-                <div class="command-title">
-                  {command.title}
-                </div>
-                <div class="command-subtitle">
-                  {command.subtitle}
-                </div>
+                <div class="command-title">{command.title}</div>
+                <div class="command-subtitle">{command.subtitle}</div>
               </div>
-              <div class="command-category">
-                {command.category}
-              </div>
+              <div class="command-category">{command.category}</div>
             </div>
           )}
         </For>

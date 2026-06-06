@@ -2,22 +2,27 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"rilaunch/pkg/appm"
 	"rilaunch/pkg/clipm"
 	"rilaunch/pkg/config"
+	"rilaunch/pkg/notes"
+	goruntime "runtime"
 	"strings"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	wails_runtime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.design/x/hotkey"
 )
 
 type App struct {
-	ctx context.Context
+	ctx          context.Context
 	refreshCh    chan bool
 	isVisible    bool
 	clipData     []clipm.ClipInfo
@@ -25,15 +30,16 @@ type App struct {
 	appManager   *appm.Manager
 	lastCommand  string
 	lastOutput   string
+	notesStore   *notes.NotesStore
+	iconCache    map[string]string
 }
-
 
 func NewApp() *App {
 	return &App{
 		appManager: appm.NewManager(),
+		iconCache:  make(map[string]string),
 	}
 }
-
 
 func (a *App) startup(ctx context.Context) {
 
@@ -45,17 +51,21 @@ func (a *App) startup(ctx context.Context) {
 
 	go clipm.Record(ctx)
 
-
 	go func() {
 		if err := a.appManager.Initialize(); err != nil {
 			fmt.Printf("Failed to initialize application manager: %v\n", err)
 		}
 	}()
 
+	// Initialize notes store
+	cfg := config.GetInstance()
+	a.notesStore = &notes.NotesStore{DB: cfg.DB}
+	if err := a.notesStore.EnsureBucket(); err != nil {
+		fmt.Printf("Failed to init notes store: %v\n", err)
+	}
 
 	a.RegisterHotKey()
 }
-
 
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
@@ -111,7 +121,6 @@ func (a *App) LaunchApp(appID string) error {
 		return err
 	}
 
-
 	a.hideWindow()
 	return nil
 }
@@ -148,6 +157,90 @@ func (a *App) GetLastOutput() string {
 	return a.lastOutput
 }
 
+// ── Notes ─────────────────────────────────────────────────────────────────────
+
+func (a *App) SaveNote(content, tag string) string {
+	note, err := a.notesStore.Save(content, tag)
+	if err != nil {
+		return `{"error":"` + err.Error() + `"}`
+	}
+	data, _ := json.Marshal(note)
+	return string(data)
+}
+
+func (a *App) GetNotes() string {
+	ns, err := a.notesStore.GetAll()
+	if err != nil {
+		return "[]"
+	}
+	data, _ := json.Marshal(ns)
+	return string(data)
+}
+
+func (a *App) DeleteNote(id string) error {
+	return a.notesStore.Delete(id)
+}
+
+// ── App Icons ─────────────────────────────────────────────────────────────────
+
+func (a *App) GetAppIcon(appPath string) string {
+	if cached, ok := a.iconCache[appPath]; ok {
+		return cached
+	}
+	icon := extractMacOSIconBase64(appPath)
+	a.iconCache[appPath] = icon
+	return icon
+}
+
+func extractMacOSIconBase64(appPath string) string {
+	if goruntime.GOOS != "darwin" {
+		return ""
+	}
+
+	plistPath := filepath.Join(appPath, "Contents", "Info.plist")
+	if _, err := os.Stat(plistPath); err != nil {
+		return ""
+	}
+
+	out, err := exec.Command("plutil", "-extract", "CFBundleIconFile", "raw", "-o", "-", plistPath).Output()
+	iconName := strings.TrimSpace(string(out))
+	if err != nil || iconName == "" {
+		iconName = "AppIcon"
+	}
+	if !strings.HasSuffix(iconName, ".icns") {
+		iconName += ".icns"
+	}
+
+	icnsPath := filepath.Join(appPath, "Contents", "Resources", iconName)
+	if _, err := os.Stat(icnsPath); err != nil {
+		for _, name := range []string{"AppIcon.icns", "icon.icns", "Application.icns"} {
+			p := filepath.Join(appPath, "Contents", "Resources", name)
+			if _, err := os.Stat(p); err == nil {
+				icnsPath = p
+				break
+			}
+		}
+		if _, err := os.Stat(icnsPath); err != nil {
+			return ""
+		}
+	}
+
+	// Use cached temp PNG if already converted
+	hash := md5.Sum([]byte(appPath))
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("rilaunch_%x.png", hash))
+	if _, err := os.Stat(tmpFile); err != nil {
+		if err := exec.Command("sips", "-s", "format", "png", "-Z", "32", icnsPath, "--out", tmpFile).Run(); err != nil {
+			return ""
+		}
+	}
+
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		return ""
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
+}
+
 func registerHotkey(a *App) {
 	hk := hotkey.New([]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModShift}, hotkey.KeySpace)
 	err := hk.Register()
@@ -165,12 +258,11 @@ func registerHotkey(a *App) {
 		case <-hk.Keyup():
 			fmt.Printf("hotkey: %v is up\n", hk)
 
-
-				if a.isVisible {
-					a.hideWindow()
-				} else {
-					a.showWindow()
-				}
+			if a.isVisible {
+				a.hideWindow()
+			} else {
+				a.showWindow()
+			}
 
 			select {
 			case a.refreshCh <- true:
@@ -184,12 +276,12 @@ func registerHotkey(a *App) {
 
 func (a *App) showWindow() {
 	a.isVisible = true
-	runtime.EventsEmit(a.ctx, "Backend:GlobalHotkeyEvent", time.Now().String())
+	wails_runtime.EventsEmit(a.ctx, "Backend:GlobalHotkeyEvent", time.Now().String())
 }
 
 func (a *App) hideWindow() {
 	a.isVisible = false
-	runtime.EventsEmit(a.ctx, "Backend:GlobalHotkeyEvent", time.Now().String())
+	wails_runtime.EventsEmit(a.ctx, "Backend:GlobalHotkeyEvent", time.Now().String())
 }
 
 func (a *App) onExit() {}

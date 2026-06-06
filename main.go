@@ -31,6 +31,7 @@ func main() {
 		Linux:         &linux.Options{},
 		Mac: &mac.Options{
 			WebviewIsTransparent: true,
+			WindowIsTranslucent:  true,
 		},
 		Windows: &windows.Options{
 			WebviewIsTransparent: true,

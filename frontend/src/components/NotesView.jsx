@@ -19,7 +19,8 @@ function TagPill({ tag }) {
   );
 }
 
-function NotesView({ notes, onSave, onDelete }) {
+function NotesView(props) {
+  const { onSave, onDelete } = props;
   const [newContent, setNewContent] = createSignal('');
   const [newTag, setNewTag] = createSignal('Note');
   const [showCompose, setShowCompose] = createSignal(false);
@@ -87,7 +88,7 @@ function NotesView({ notes, onSave, onDelete }) {
 
       {/* List */}
       <div class="notes-list">
-        <Show when={notes.length === 0}>
+        <Show when={props.notes.length === 0}>
           <div class="notes-empty">
             <div class="notes-empty-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3">
@@ -100,7 +101,7 @@ function NotesView({ notes, onSave, onDelete }) {
             <div class="notes-empty-sub">Click + to save a snippet, idea, or to-do</div>
           </div>
         </Show>
-        <For each={notes}>
+        <For each={props.notes}>
           {(note) => (
             <div class="note-item">
               <div class="note-header">

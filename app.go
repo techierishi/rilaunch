@@ -125,23 +125,79 @@ func (a *App) LaunchApp(appID string) error {
 	return nil
 }
 
+// interactiveCommands is the set of CLI programs that require a real TTY.
+// Running them in a non-TTY exec will hang or produce garbage output.
+var interactiveCommands = map[string]bool{
+	// TUI monitors
+	"top": true, "htop": true, "btop": true, "atop": true, "glances": true,
+	// Text editors
+	"vim": true, "vi": true, "nvim": true, "nano": true, "emacs": true,
+	"pico": true, "micro": true, "helix": true, "hx": true,
+	// Pagers
+	"less": true, "more": true, "most": true,
+	// Interactive finders / file managers
+	"fzf": true, "ranger": true, "nnn": true, "broot": true, "lf": true, "yazi": true,
+	// Shells
+	"bash": true, "sh": true, "zsh": true, "fish": true, "ksh": true,
+	"tcsh": true, "csh": true, "dash": true,
+	// REPLs
+	"python": true, "python3": true, "python2": true,
+	"node": true, "deno": true,
+	"irb": true, "iex": true, "ghci": true, "sqlite3": true,
+	"psql": true, "mysql": true, "mongo": true,
+	// Network / remote
+	"ssh": true, "telnet": true, "nc": true, "netcat": true,
+	// Misc TUI
+	"man": true, "watch": true, "crontab": true,
+}
+
 func (a *App) ExecuteCommand(command string) string {
 	if strings.TrimSpace(command) == "" {
-		return "Error: Empty command"
+		return "Error: empty command"
 	}
 
 	a.lastCommand = command
 
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
-		return "Error: Invalid command"
+		return "Error: invalid command"
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
+	// Resolve bare binary name (handles full paths like /usr/bin/vim)
+	bin := filepath.Base(parts[0])
+
+	// Block interactive / TTY-dependent commands
+	if interactiveCommands[bin] {
+		return fmt.Sprintf(
+			"[blocked] '%s' is an interactive command that requires a TTY.\n"+
+				"Use a non-interactive equivalent instead, e.g.:\n"+
+				"  top  →  ps aux\n"+
+				"  man  →  man -P cat <topic>\n"+
+				"  python  →  python -c '...'",
+			bin,
+		)
+	}
+
+	// Block tail -f / --follow (runs indefinitely)
+	if bin == "tail" {
+		for _, arg := range parts[1:] {
+			if arg == "-f" || arg == "--follow" || (len(arg) > 1 && arg[0] == '-' && arg[1] != '-' && strings.ContainsRune(arg, 'f')) {
+				return "[blocked] 'tail -f' follows a file indefinitely and cannot run here.\nUse 'tail -n 50 <file>' for a snapshot instead."
+			}
+		}
+	}
+
+	// Run with a 15-second timeout to prevent accidental hangs
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	output, err := cmd.CombinedOutput()
 
 	result := string(output)
-	if err != nil {
+	if ctx.Err() == context.DeadlineExceeded {
+		result = fmt.Sprintf("[timeout] command exceeded 15 s and was killed.\n%s", result)
+	} else if err != nil {
 		result = fmt.Sprintf("Error: %v\n%s", err, result)
 	}
 

@@ -11,8 +11,28 @@
   flex-shrink: 0;
 }
 
-.search-input {
+/* Shell mode $ prompt */
+.shell-prompt-icon {
+  color: #3b82f6;
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* Input wrapper: fills remaining width, anchors ghost overlay */
+.search-input-wrap {
   flex: 1;
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* Standard search input */
+.search-input {
+  width: 100%;
   border: none;
   outline: none;
   font-size: 15px;
@@ -21,6 +41,9 @@
   color: #1a1a1c;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   letter-spacing: -0.01em;
+  position: relative;
+  z-index: 1;
+  padding: 0;
 }
 
 .search-input::placeholder {
@@ -30,4 +53,45 @@
 
 .search-input:focus::placeholder {
   color: #d8d8e4;
+}
+
+/* Shell mode: monospace font for exact ghost alignment */
+.shell-input {
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: #1a1a1c;
+}
+
+.shell-input::placeholder {
+  color: #b8b8cc;
+}
+
+/* Ghost text overlay (inline autocomplete) */
+.shell-ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  white-space: pre;
+  overflow: hidden;
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  z-index: 0;
+}
+
+/* Invisible spacer that matches the typed portion width */
+.ghost-typed {
+  color: transparent;
+  white-space: pre;
+}
+
+/* The suggested remainder shown in gray */
+.ghost-suggestion {
+  color: #b0b8c8;
+  white-space: pre;
 }

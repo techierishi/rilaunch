@@ -36,25 +36,21 @@ function AppIcon({ appPath, name }) {
   );
 }
 
-function CommandList({ commands, selectedIndex, onSelect, onLaunch }) {
+function CommandList(props) {
   const handleClick = (command, index) => {
-    onSelect(index);
-    if (onLaunch) onLaunch(command);
-  };
-
-  const handleMouseEnter = (index) => {
-    onSelect(index);
+    props.onSelect(index);
+    if (props.onLaunch) props.onLaunch(command);
   };
 
   return (
     <div class="command-list">
       <div class="command-list-scroll">
-        <For each={commands}>
+        <For each={props.commands}>
           {(command, index) => (
             <div
-              class={"command-item" + (index() === selectedIndex ? ' selected' : '')}
+              class={"command-item" + (index() === props.selectedIndex ? ' selected' : '')}
               onClick={() => handleClick(command, index())}
-              onMouseEnter={() => handleMouseEnter(index())}
+              onMouseEnter={() => props.onSelect(index())}
             >
               <div class="command-icon">
                 <AppIcon

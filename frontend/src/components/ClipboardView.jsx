@@ -1,15 +1,15 @@
-import { For } from 'solid-js';
+import { For, Show } from 'solid-js';
 import './ClipboardView.css';
 
-function ClipboardView({ clipboardData, filteredClipboardData, clipboardSelectedIndex, onItemClick }) {
+function ClipboardView(props) {
   return (
     <div class="clipboard-view">
       <div class="clipboard-list">
-        <For each={filteredClipboardData}>
+        <For each={props.filteredClipboardData}>
           {(item, index) => (
             <div
-              class={`clipboard-item${index() === clipboardSelectedIndex ? ' selected' : ''}`}
-              onClick={() => onItemClick(item)}
+              class={`clipboard-item${index() === props.clipboardSelectedIndex ? ' selected' : ''}`}
+              onClick={() => props.onItemClick(item)}
             >
               <div class="clip-text">{item.content || item.text || 'No content'}</div>
               <div class="clip-meta">
@@ -21,11 +21,11 @@ function ClipboardView({ clipboardData, filteredClipboardData, clipboardSelected
             </div>
           )}
         </For>
-        {filteredClipboardData.length === 0 && (
+        <Show when={props.filteredClipboardData.length === 0}>
           <div class="clip-empty">
-            {clipboardData.length > 0 ? 'No matching items' : 'Clipboard is empty'}
+            {props.clipboardData.length > 0 ? 'No matching items' : 'Clipboard is empty'}
           </div>
-        )}
+        </Show>
       </div>
     </div>
   );

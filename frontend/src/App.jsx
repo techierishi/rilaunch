@@ -1,6 +1,6 @@
-import { createSignal, createEffect, createMemo, onMount } from 'solid-js';
+import { createSignal, createEffect, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import Fuse from 'fuse.js';
-import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetLastCommand, GetLastOutput, GetNotes, SaveNote, DeleteNote } from '../wailsjs/go/main/App';
+import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetNotes, SaveNote, DeleteNote } from '../wailsjs/go/main/App';
 import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
 import ClipboardView from './components/ClipboardView';
@@ -42,10 +42,25 @@ const IconNotes = () => (
   </svg>
 );
 
+// ── Shell history helpers ─────────────────────────────────────────────────────
+
+const SHELL_HISTORY_KEY = 'rilaunch_shell_history';
+
+function loadShellHistory() {
+  try { return JSON.parse(localStorage.getItem(SHELL_HISTORY_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveShellHistoryItem(cmd) {
+  const hist = loadShellHistory().filter(h => h !== cmd);
+  hist.unshift(cmd);
+  localStorage.setItem(SHELL_HISTORY_KEY, JSON.stringify(hist.slice(0, 50)));
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-  const TABS = ['apps', 'clipboard', 'shell', 'notes'];
+  const TABS = ['apps', 'clipboard', 'notes', 'shell'];
 
   const [activeTab, setActiveTab] = createSignal('apps');
   const [searchQuery, setSearchQuery] = createSignal('');
@@ -53,14 +68,15 @@ function App() {
   const [clipboardData, setClipboardData] = createSignal([]);
   const [clipboardSelectedIndex, setClipboardSelectedIndex] = createSignal(0);
   const [allApps, setAllApps] = createSignal([]);
-  const [currentCommand, setCurrentCommand] = createSignal('');
   const [commandOutput, setCommandOutput] = createSignal('');
   const [isExecuting, setIsExecuting] = createSignal(false);
   const [notesList, setNotesList] = createSignal([]);
+  const [shellHistory, setShellHistory] = createSignal(loadShellHistory());
+  const [shellHistoryIndex, setShellHistoryIndex] = createSignal(-1);
 
   let searchInputRef;
 
-  // ── Fuse index (recreated only when allApps changes) ──────────────────────
+  // ── Fuse index (rebuilt only when allApps changes) ────────────────────────
   const fuseIndex = createMemo(() =>
     new Fuse(allApps(), {
       keys: ['title', 'subtitle', 'category'],
@@ -69,6 +85,7 @@ function App() {
     })
   );
 
+  // ── Per-tab filtered data (memos) ─────────────────────────────────────────
   const filteredApps = createMemo(() => {
     const q = searchQuery().trim();
     if (!q) return allApps();
@@ -87,17 +104,24 @@ function App() {
     const term = searchQuery().toLowerCase();
     if (!term) return notesList();
     return notesList().filter(n =>
-      n.content.toLowerCase().includes(term) ||
-      n.tag.toLowerCase().includes(term)
+      n.content.toLowerCase().includes(term) || n.tag.toLowerCase().includes(term)
     );
   });
 
-  // ── Placeholder per tab ──────────────────────────────────────────────────
+  // Inline autocomplete: first history item starting with current input
+  const shellSuggestion = createMemo(() => {
+    if (activeTab() !== 'shell') return '';
+    const q = searchQuery().trim();
+    if (!q) return '';
+    return shellHistory().find(h => h.toLowerCase().startsWith(q.toLowerCase())) || '';
+  });
+
+  // ── Search bar config per tab ─────────────────────────────────────────────
   const searchPlaceholder = () => {
     switch (activeTab()) {
       case 'apps':      return 'Search applications...';
       case 'clipboard': return 'Filter clipboard...';
-      case 'shell':     return 'Shell executor';
+      case 'shell':     return 'Enter shell command...';
       case 'notes':     return 'Search notes...';
       default:          return 'Search...';
     }
@@ -109,8 +133,8 @@ function App() {
     setSearchQuery('');
     setSelectedIndex(0);
     setClipboardSelectedIndex(0);
+    setShellHistoryIndex(-1);
     if (tab === 'clipboard') loadClipboardData();
-    if (tab === 'shell')     loadLastCommand();
     if (tab === 'notes')     loadNotes();
     setTimeout(() => { if (searchInputRef) searchInputRef.focus(); }, 30);
   };
@@ -136,22 +160,11 @@ function App() {
         appData:  app,
       }));
       setAllApps(mapped);
-      if (mapped.length === 0) {
-        // Backend may still be initializing — retry
-        setTimeout(loadAllApps, 1500);
-      }
+      if (mapped.length === 0) setTimeout(loadAllApps, 1500);
     } catch (e) {
       console.error(e);
       setTimeout(loadAllApps, 2000);
     }
-  };
-
-  const loadLastCommand = async () => {
-    try {
-      const cmd = await GetLastCommand();
-      const out = await GetLastOutput();
-      if (cmd) { setCurrentCommand(cmd); setCommandOutput(out || ''); }
-    } catch (e) {}
   };
 
   const loadNotes = async () => {
@@ -168,11 +181,10 @@ function App() {
     }
   };
 
-  const handleCommandExecute = async (command) => {
+  const handleCommandExecute = async (cmd) => {
     setIsExecuting(true);
     try {
-      const output = await ExecuteCommand(command);
-      setCurrentCommand(command);
+      const output = await ExecuteCommand(cmd);
       setCommandOutput(output);
     } catch (e) {
       setCommandOutput('Error: ' + e.message);
@@ -187,38 +199,92 @@ function App() {
   };
 
   const handleSaveNote = async (content, tag) => {
-    try {
-      await SaveNote(content, tag);
-      await loadNotes();
-    } catch (e) { console.error(e); }
+    try { await SaveNote(content, tag); await loadNotes(); }
+    catch (e) { console.error(e); }
   };
 
   const handleDeleteNote = async (id) => {
-    try {
-      await DeleteNote(id);
-      await loadNotes();
-    } catch (e) { console.error(e); }
+    try { await DeleteNote(id); await loadNotes(); }
+    catch (e) { console.error(e); }
   };
 
-  // ── Keyboard ──────────────────────────────────────────────────────────────
+  // ── Keyboard handler ──────────────────────────────────────────────────────
   const handleKeyDown = async (e) => {
+    // Escape: clear query or quit
     if (e.key === 'Escape') {
-      if (searchQuery() !== '') { setSearchQuery(''); return; }
+      if (searchQuery() !== '') { setSearchQuery(''); setShellHistoryIndex(-1); return; }
       Quit();
       return;
     }
 
-    if ((e.metaKey || e.ctrlKey) && ['1', '2', '3', '4'].includes(e.key)) {
+    // Tab / Shift+Tab: cycle plugins (skip inside textareas)
+    if (e.key === 'Tab' && e.target.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      const cur = TABS.indexOf(activeTab());
+      const next = e.shiftKey
+        ? (cur - 1 + TABS.length) % TABS.length
+        : (cur + 1) % TABS.length;
+      switchTab(TABS[next]);
+      return;
+    }
+
+    // ⌘1-4: switch tabs
+    if ((e.metaKey || e.ctrlKey) && ['1','2','3','4'].includes(e.key)) {
       e.preventDefault();
       switchTab(TABS[parseInt(e.key) - 1]);
       return;
     }
 
+    // Shell tab: Enter executes, ↑↓ navigates history
+    if (activeTab() === 'shell') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const cmd = searchQuery().trim();
+        if (!cmd || isExecuting()) return;
+        saveShellHistoryItem(cmd);
+        setShellHistory(loadShellHistory());
+        setShellHistoryIndex(-1);
+        setSearchQuery('');
+        handleCommandExecute(cmd);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const hist = shellHistory();
+        if (!hist.length) return;
+        const next = Math.min(shellHistoryIndex() + 1, hist.length - 1);
+        setShellHistoryIndex(next);
+        setSearchQuery(hist[next]);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = shellHistoryIndex() - 1;
+        if (next < 0) { setShellHistoryIndex(-1); setSearchQuery(''); return; }
+        setShellHistoryIndex(next);
+        setSearchQuery(shellHistory()[next]);
+      } else if (e.key === 'ArrowRight') {
+        // Accept inline ghost suggestion when cursor is at end
+        const sug = shellSuggestion();
+        if (sug && searchInputRef &&
+            searchInputRef.selectionEnd === (searchInputRef.value || '').length) {
+          e.preventDefault();
+          setSearchQuery(sug);
+          setShellHistoryIndex(-1);
+        }
+      }
+      return;
+    }
+
+    // Notes tab: no keyboard nav
+    if (activeTab() === 'notes') return;
+
+    // Clipboard tab
     if (activeTab() === 'clipboard') {
       const data = filteredClipboardData();
-      if (e.key === 'ArrowDown') { e.preventDefault(); setClipboardSelectedIndex(i => (i + 1) % Math.max(data.length, 1)); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); setClipboardSelectedIndex(i => i === 0 ? data.length - 1 : i - 1); }
-      else if (e.key === 'Enter') {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setClipboardSelectedIndex(i => (i + 1) % Math.max(data.length, 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setClipboardSelectedIndex(i => i === 0 ? data.length - 1 : i - 1);
+      } else if (e.key === 'Enter') {
         e.preventDefault();
         const item = data[clipboardSelectedIndex()];
         if (item) { navigator.clipboard.writeText(item.content || item.text || ''); WindowHide(); }
@@ -226,27 +292,37 @@ function App() {
       return;
     }
 
-    if (activeTab() === 'shell' || activeTab() === 'notes') return;
-
-    // apps tab arrow nav + enter to launch
+    // Apps tab: ↑↓ navigate, Enter launch
     const filtered = filteredApps();
-    if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIndex(i => (i + 1) % Math.max(filtered.length, 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIndex(i => i === 0 ? filtered.length - 1 : i - 1); }
-    else if (e.key === 'Enter') { e.preventDefault(); await handleAppLaunch(filtered[selectedIndex()]); }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex(i => (i + 1) % Math.max(filtered.length, 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex(i => i === 0 ? filtered.length - 1 : i - 1);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      await handleAppLaunch(filtered[selectedIndex()]);
+    }
   };
 
   // ── Effects ───────────────────────────────────────────────────────────────
-  createEffect(() => { const _ = searchQuery(); setSelectedIndex(0); setClipboardSelectedIndex(0); });
-
+  // Reset selection when query changes
   createEffect(() => {
-    document.addEventListener('keydown', handleKeyDown);
-    EventsOn('Backend:GlobalHotkeyEvent', () => WindowShow());
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    const _ = searchQuery();
+    setSelectedIndex(0);
+    setClipboardSelectedIndex(0);
   });
 
   onMount(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    EventsOn('Backend:GlobalHotkeyEvent', () => WindowShow());
     loadAllApps();
     if (searchInputRef) searchInputRef.focus();
+  });
+
+  onCleanup(() => {
+    document.removeEventListener('keydown', handleKeyDown);
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -257,53 +333,53 @@ function App() {
         <div class="search-section">
           <SearchBar
             ref={searchInputRef}
-            searchQuery={searchQuery()}
-            setSearchQuery={setSearchQuery}
+            value={searchQuery()}
+            onInput={setSearchQuery}
             placeholder={searchPlaceholder()}
+            isShellMode={activeTab() === 'shell'}
+            suggestion={shellSuggestion()}
           />
         </div>
 
         <div class="body-section">
 
           <div class="sidebar">
-            <button class={"tab-btn" + (activeTab() === 'apps' ? ' active' : '')} onClick={() => switchTab('apps')} title="Applications  ⌘1"><IconApps /></button>
-            <button class={"tab-btn" + (activeTab() === 'clipboard' ? ' active' : '')} onClick={() => switchTab('clipboard')} title="Clipboard  ⌘2"><IconClipboard /></button>
-            <button class={"tab-btn" + (activeTab() === 'shell' ? ' active' : '')} onClick={() => switchTab('shell')} title="Shell  ⌘3"><IconTerminal /></button>
-            <button class={"tab-btn" + (activeTab() === 'notes' ? ' active' : '')} onClick={() => switchTab('notes')} title="Notes  ⌘4"><IconNotes /></button>
+            <button class={"tab-btn" + (activeTab() === 'apps'      ? ' active' : '')} onClick={() => switchTab('apps')}      title="Applications ⌘1"><IconApps /></button>
+            <button class={"tab-btn" + (activeTab() === 'clipboard' ? ' active' : '')} onClick={() => switchTab('clipboard')} title="Clipboard ⌘2"><IconClipboard /></button>
+            <button class={"tab-btn" + (activeTab() === 'notes'     ? ' active' : '')} onClick={() => switchTab('notes')}     title="Notes ⌘3"><IconNotes /></button>
+            <button class={"tab-btn" + (activeTab() === 'shell'     ? ' active' : '')} onClick={() => switchTab('shell')}     title="Shell ⌘4"><IconTerminal /></button>
           </div>
 
           <div class="content-panel">
-            {activeTab() === 'apps' && (
+            <Show when={activeTab() === 'apps'}>
               <ApplicationView
                 apps={filteredApps()}
                 selectedIndex={selectedIndex()}
                 onSelect={setSelectedIndex}
                 onLaunch={handleAppLaunch}
               />
-            )}
-            {activeTab() === 'clipboard' && (
+            </Show>
+            <Show when={activeTab() === 'clipboard'}>
               <ClipboardView
                 clipboardData={clipboardData()}
                 filteredClipboardData={filteredClipboardData()}
                 clipboardSelectedIndex={clipboardSelectedIndex()}
                 onItemClick={handleClipboardItemClick}
               />
-            )}
-            {activeTab() === 'shell' && (
+            </Show>
+            <Show when={activeTab() === 'shell'}>
               <CommandExecutor
-                output={() => commandOutput()}
-                isLoading={() => isExecuting()}
-                onExecute={handleCommandExecute}
-                lastExecutedCommand={currentCommand()}
+                output={commandOutput()}
+                isLoading={isExecuting()}
               />
-            )}
-            {activeTab() === 'notes' && (
+            </Show>
+            <Show when={activeTab() === 'notes'}>
               <NotesView
                 notes={filteredNotes()}
                 onSave={handleSaveNote}
                 onDelete={handleDeleteNote}
               />
-            )}
+            </Show>
           </div>
 
         </div>

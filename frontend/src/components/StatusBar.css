@@ -6,7 +6,6 @@
   padding: 0 12px;
   background: rgba(238, 238, 243, 0.95);
   border-top: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 0 0 4px 4px;
   overflow: hidden;
   user-select: none;
 }

@@ -428,6 +428,7 @@ function App() {
     // preventing browser-native focus navigation from stealing Tab on the clipboard page.
     document.addEventListener('keydown', handleKeyDown, true);
     EventsOn('Backend:GlobalHotkeyEvent', () => WindowShow());
+    EventsOn('ClipboardUpdated', () => loadClipboardData());
     loadAllApps();
     if (searchInputRef) searchInputRef.focus();
   });

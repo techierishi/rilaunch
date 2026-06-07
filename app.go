@@ -19,6 +19,7 @@ import (
 	"time"
 
 	wails_runtime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.design/x/clipboard"
 	"golang.design/x/hotkey"
 )
 
@@ -51,6 +52,9 @@ func (a *App) startup(ctx context.Context) {
 		wails_runtime.Quit(ctx)
 	})
 
+	clipm.SetRefreshCallback(func() {
+		wails_runtime.EventsEmit(ctx, "ClipboardUpdated")
+	})
 	go clipm.Record(ctx)
 
 	go func() {
@@ -111,7 +115,14 @@ func (a *App) ClearClipboard() error {
 	clipm := &clipm.ClipM{
 		DB: clipDb.DB,
 	}
-	return clipm.DeleteBucket()
+	err := clipm.DeleteBucket()
+	if err == nil {
+		// Clear the OS clipboard as well in a goroutine to prevent blocking
+		go func() {
+			clipboard.Write(clipboard.FmtText, []byte(" "))
+		}()
+	}
+	return err
 }
 
 

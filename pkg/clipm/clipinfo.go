@@ -119,24 +119,26 @@ func (clipm *ClipM) MarkSecret(key string) error {
 }
 
 func (clipm *ClipM) DeleteBucket() error {
-	err := clipm.DB.Update(func(tx *bolt.Tx) error {
-		return tx.DeleteBucket(config.ClipBucket)
+	return clipm.DB.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(config.ClipBucket)
+		if b == nil {
+			return nil
+		}
+		var keys [][]byte
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			// Make a copy of the key because boltDB keys are only valid for the life of the transaction/cursor step
+			kCopy := make([]byte, len(k))
+			copy(kCopy, k)
+			keys = append(keys, kCopy)
+		}
+		for _, k := range keys {
+			if err := b.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
-
-	if err != nil {
-		return err
-	}
-
-	err = clipm.DB.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(config.ClipBucket)
-		return err
-	})
-
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (clipm *ClipM) Reverse(clipInfos []ClipInfo) {

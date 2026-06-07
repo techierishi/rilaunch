@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"rilaunch/pkg/config"
+	"strings"
 
 	"rilaunch/pkg/util"
 
@@ -52,6 +53,9 @@ func Record(ctx context.Context) error {
 		}
 
 		copiedStr := string(data)
+		if len(strings.TrimSpace(copiedStr)) == 0 {
+			continue
+		}
 
 		timestamp := util.UnixMilli()
 		clipInfo := ClipInfo{

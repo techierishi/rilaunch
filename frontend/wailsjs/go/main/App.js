@@ -62,6 +62,10 @@ export function SearchApps(arg1) {
   return window['go']['main']['App']['SearchApps'](arg1);
 }
 
+export function ToggleClipSecret(arg1) {
+  return window['go']['main']['App']['ToggleClipSecret'](arg1);
+}
+
 export function UpdateNote(arg1, arg2, arg3) {
   return window['go']['main']['App']['UpdateNote'](arg1, arg2, arg3);
 }

@@ -98,6 +98,15 @@ func (a *App) GetClipData(name string) string {
 	return string(jsonClipList)
 }
 
+func (a *App) ToggleClipSecret(hash string) error {
+	clipDb := config.GetInstance()
+	clipm := &clipm.ClipM{
+		DB: clipDb.DB,
+	}
+	return clipm.MarkSecret(hash)
+}
+
+
 func (a *App) GetAllApps() string {
 	apps, err := a.appManager.GetAllApps()
 	if err != nil {

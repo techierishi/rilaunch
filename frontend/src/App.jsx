@@ -1,6 +1,6 @@
 import { createSignal, createEffect, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import Fuse from 'fuse.js';
-import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetNotes, SaveNote, DeleteNote, UpdateNote } from '../wailsjs/go/main/App';
+import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetNotes, SaveNote, DeleteNote, UpdateNote, ToggleClipSecret } from '../wailsjs/go/main/App';
 import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
 import ClipboardView from './components/ClipboardView';
@@ -218,6 +218,16 @@ function App() {
     WindowHide();
   };
 
+  const handleToggleSecret = async (item) => {
+    try {
+      await ToggleClipSecret(item.hash);
+      setClipboardData(prev => prev.map(x => x.hash === item.hash ? { ...x, is_secret: !x.is_secret } : x));
+    } catch (e) {
+      console.error('Failed to toggle secret:', e);
+    }
+  };
+
+
   const handleSaveNote = async (content, tag) => {
     try { await SaveNote(content, tag); await loadNotes(); showStatus('Note saved', 'success'); }
     catch (e) { console.error(e); showStatus('Failed to save', 'error'); }
@@ -397,6 +407,7 @@ function App() {
                 filteredClipboardData={filteredClipboardData()}
                 clipboardSelectedIndex={clipboardSelectedIndex()}
                 onItemClick={handleClipboardItemClick}
+                onToggleSecret={handleToggleSecret}
               />
             </Show>
             <Show when={activeTab() === 'shell'}>

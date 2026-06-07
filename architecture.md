@@ -122,7 +122,6 @@ Click ✕ on note
 - `WebviewIsTransparent: true` — webview background is transparent.
 - `BackgroundColour: {R:0, G:0, B:0, A:0}` — no native background color painted.
 - **No** `WindowIsTranslucent` — that enables macOS vibrancy (frosted glass), which was bleeding through transparent CSS regions.
-- The visible "window" is the `.main-container` div styled with `border-radius: 16px` and `box-shadow`.
 
 ---
 

@@ -8,6 +8,7 @@ import ApplicationView from './components/ApplicationView';
 import CommandExecutor from './components/CommandExecutor';
 import NotesView from './components/NotesView';
 import SettingsView from './components/SettingsView';
+import StatusBar from './components/StatusBar';
 import './App.css';
 
 // ── Flat SVG icons ────────────────────────────────────────────────────────────
@@ -82,6 +83,16 @@ function App() {
   const [shellHistory, setShellHistory] = createSignal(loadShellHistory());
   const [shellHistoryIndex, setShellHistoryIndex] = createSignal(-1);
   const [showSettings, setShowSettings] = createSignal(false);
+  const [statusMsg, setStatusMsg] = createSignal('');
+  const [statusColor, setStatusColor] = createSignal('info');
+  let statusTimer;
+
+  const showStatus = (msg, type = 'info') => {
+    clearTimeout(statusTimer);
+    setStatusMsg(msg);
+    setStatusColor(type);
+    statusTimer = setTimeout(() => setStatusMsg(''), 2500);
+  };
 
   let searchInputRef;
 
@@ -208,18 +219,18 @@ function App() {
   };
 
   const handleSaveNote = async (content, tag) => {
-    try { await SaveNote(content, tag); await loadNotes(); }
-    catch (e) { console.error(e); }
+    try { await SaveNote(content, tag); await loadNotes(); showStatus('Note saved', 'success'); }
+    catch (e) { console.error(e); showStatus('Failed to save', 'error'); }
   };
 
   const handleDeleteNote = async (id) => {
-    try { await DeleteNote(id); await loadNotes(); }
+    try { await DeleteNote(id); await loadNotes(); showStatus('Note deleted'); }
     catch (e) { console.error(e); }
   };
 
   const handleUpdateNote = async (id, content, tag) => {
-    try { await UpdateNote(id, content, tag); await loadNotes(); }
-    catch (e) { console.error(e); }
+    try { await UpdateNote(id, content, tag); await loadNotes(); showStatus('Note updated', 'success'); }
+    catch (e) { console.error(e); showStatus('Failed to update', 'error'); }
   };
 
   // ── Keyboard handler ──────────────────────────────────────────────────────
@@ -231,8 +242,8 @@ function App() {
       return;
     }
 
-    // Tab / Shift+Tab: cycle plugins (skip inside textareas)
-    if (e.key === 'Tab' && e.target.tagName !== 'TEXTAREA') {
+    // Tab / Shift+Tab: cycle plugins (skip inside form fields)
+    if (e.key === 'Tab' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') {
       e.preventDefault();
       const cur = TABS.indexOf(activeTab());
       const next = e.shiftKey
@@ -329,14 +340,16 @@ function App() {
   });
 
   onMount(() => {
-    document.addEventListener('keydown', handleKeyDown);
+    // Use capture phase so our Tab/Esc handler fires before any element's own keydown,
+    // preventing browser-native focus navigation from stealing Tab on the clipboard page.
+    document.addEventListener('keydown', handleKeyDown, true);
     EventsOn('Backend:GlobalHotkeyEvent', () => WindowShow());
     loadAllApps();
     if (searchInputRef) searchInputRef.focus();
   });
 
   onCleanup(() => {
-    document.removeEventListener('keydown', handleKeyDown);
+    document.removeEventListener('keydown', handleKeyDown, true);
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -404,6 +417,9 @@ function App() {
           </div>
 
         </div>
+
+        <StatusBar activeTab={activeTab()} statusMsg={statusMsg()} statusColor={statusColor()} />
+
       </div>
     </div>
   );

@@ -1,0 +1,38 @@
+.status-bar {
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: rgba(238, 238, 243, 0.95);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 0 0 4px 4px;
+  overflow: hidden;
+  user-select: none;
+}
+
+.status-hints {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.status-hint {
+  font-size: 10.5px;
+  color: rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+}
+
+.status-message {
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.status-message.success { color: #16a34a; }
+.status-message.error   { color: #dc2626; }
+.status-message.info    { color: rgba(0, 0, 0, 0.45); }

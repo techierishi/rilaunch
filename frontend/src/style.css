@@ -4,7 +4,16 @@
   padding: 0;
 }
 
-html, body {
+html {
+  height: 100%;
+  background: transparent;
+  /* Clip the WKWebView compositing surface to rounded corners so no native
+     window background bleeds through at the corners. */
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+body {
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif;
   -webkit-font-smoothing: antialiased;

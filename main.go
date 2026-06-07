@@ -22,7 +22,7 @@ func main() {
 	err := wails.Run(&options.App{
 		Title:     "rilaunch",
 		Width:     700,
-		Height:    600,
+		Height:    622,
 		Frameless: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
@@ -31,7 +31,6 @@ func main() {
 		Linux:         &linux.Options{},
 		Mac: &mac.Options{
 			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
 		},
 		Windows: &windows.Options{
 			WebviewIsTransparent: true,

@@ -1,6 +1,6 @@
 import { createSignal, createEffect, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import Fuse from 'fuse.js';
-import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetNotes, SaveNote, DeleteNote, UpdateNote, ToggleClipSecret } from '../wailsjs/go/main/App';
+import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetNotes, SaveNote, DeleteNote, UpdateNote, ToggleClipSecret, ClearClipboard } from '../wailsjs/go/main/App';
 import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
 import ClipboardView from './components/ClipboardView';
@@ -51,6 +51,55 @@ const IconSettings = () => (
   </svg>
 );
 
+const IconRefresh = () => (
+  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1.5 4.5h3v-3M13.5 10.5h-3v3"/>
+    <path d="M12.4 4.5A5.5 5.5 0 004.2 2L1.5 4.5M13.5 10.5l-2.7 2.5a5.5 5.5 0 01-8.2-2.5"/>
+  </svg>
+);
+
+const IconTrash = () => (
+  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 3.5h10M4.5 3.5v-1a1 1 0 011-1h4a1 1 0 011 1v1M11.5 3.5v9a1 1 0 01-1 1h-6a1 1 0 01-1-1v-9"/>
+    <line x1="6" y1="6" x2="6" y2="10"/>
+    <line x1="9" y1="6" x2="9" y2="10"/>
+  </svg>
+);
+
+const IconClear = () => (
+  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="7.5" cy="7.5" r="5.5"/>
+    <line x1="3.5" y1="3.5" x2="11.5" y2="11.5"/>
+  </svg>
+);
+
+const IconSettingsSmall = () => (
+  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="7.5" cy="7.5" r="1.5"/>
+    <path d="M7.5 1v1.5M7.5 12.5V14M1 7.5h1.5M12.5 7.5H14"/>
+  </svg>
+);
+
+const IconLock = () => (
+  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3.5" y="6.5" width="8" height="6" rx="1"/>
+    <path d="M5.5 6.5V4.5a2 2 0 1 1 4 0v2"/>
+  </svg>
+);
+
+const IconHistory = () => (
+  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="7.5" cy="7.5" r="5.5"/>
+    <polyline points="7.5,4.5 7.5,7.5 9.5,8.5"/>
+  </svg>
+);
+
+const IconFolder = () => (
+  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1.5 2.5h4l1.5 1.5h6.5v8.5a1 1 0 01-1 1h-11a1 1 0 01-1-1z"/>
+  </svg>
+);
+
 // ── Shell history helpers ─────────────────────────────────────────────────────
 
 const SHELL_HISTORY_KEY = 'rilaunch_shell_history';
@@ -83,6 +132,7 @@ function App() {
   const [shellHistory, setShellHistory] = createSignal(loadShellHistory());
   const [shellHistoryIndex, setShellHistoryIndex] = createSignal(-1);
   const [showSettings, setShowSettings] = createSignal(false);
+  const [isMenuOpen, setIsMenuOpen] = createSignal(false);
   const [statusMsg, setStatusMsg] = createSignal('');
   const [statusColor, setStatusColor] = createSignal('info');
   let statusTimer;
@@ -227,6 +277,30 @@ function App() {
     }
   };
 
+  const handleClearClipboard = async () => {
+    if (confirm('Are you sure you want to clear all clipboard items?')) {
+      try {
+        await ClearClipboard();
+        setClipboardData([]);
+        showStatus('Clipboard cleared', 'success');
+      } catch (e) {
+        console.error(e);
+        showStatus('Failed to clear clipboard', 'error');
+      }
+    }
+  };
+
+  const handleClearConsole = () => {
+    setCommandOutput('');
+    showStatus('Console cleared', 'success');
+  };
+
+  const handleReloadNotes = async () => {
+    await loadNotes();
+    showStatus('Notes reloaded', 'success');
+  };
+
+
 
   const handleSaveNote = async (content, tag) => {
     try { await SaveNote(content, tag); await loadNotes(); showStatus('Note saved', 'success'); }
@@ -364,7 +438,7 @@ function App() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div class="app">
+    <div class="app" onClick={() => setIsMenuOpen(false)}>
       <div class="main-container">
 
         <div class="search-section">
@@ -375,7 +449,57 @@ function App() {
             placeholder={searchPlaceholder()}
             isShellMode={activeTab() === 'shell'}
             suggestion={shellSuggestion()}
+            onMenuClick={(e) => { e.stopPropagation(); setIsMenuOpen(o => !o); }}
           />
+
+          <Show when={isMenuOpen() && !showSettings()}>
+            <div class="plugin-menu-panel floating-menu" onClick={(e) => e.stopPropagation()}>
+              <span class="plugin-menu-title">
+                {activeTab() === 'apps' && 'Apps'}
+                {activeTab() === 'clipboard' && 'Clipboard'}
+                {activeTab() === 'shell' && 'Terminal'}
+                {activeTab() === 'notes' && 'Notes'}
+              </span>
+              <div class="menu-list">
+                <Show when={activeTab() === 'apps'}>
+                  <button class="menu-item" onClick={() => { setIsMenuOpen(false); loadAllApps(); }}>
+                    <IconRefresh />
+                    <span>Refresh Apps</span>
+                  </button>
+                  <button class="menu-item disabled">
+                    <IconSettingsSmall />
+                    <span>App Settings</span>
+                  </button>
+                </Show>
+                <Show when={activeTab() === 'clipboard'}>
+                  <button class="menu-item danger" onClick={() => { setIsMenuOpen(false); handleClearClipboard(); }}>
+                    <IconTrash />
+                    <span>Clear All</span>
+                  </button>
+                </Show>
+                <Show when={activeTab() === 'shell'}>
+                  <button class="menu-item" onClick={() => { setIsMenuOpen(false); handleClearConsole(); }}>
+                    <IconClear />
+                    <span>Clear Console</span>
+                  </button>
+                  <button class="menu-item disabled">
+                    <IconHistory />
+                    <span>History Limit</span>
+                  </button>
+                </Show>
+                <Show when={activeTab() === 'notes'}>
+                  <button class="menu-item" onClick={() => { setIsMenuOpen(false); handleReloadNotes(); }}>
+                    <IconRefresh />
+                    <span>Reload Notes</span>
+                  </button>
+                  <button class="menu-item disabled">
+                    <IconFolder />
+                    <span>Change Folder</span>
+                  </button>
+                </Show>
+              </div>
+            </div>
+          </Show>
         </div>
 
         <div class="body-section">
@@ -426,6 +550,8 @@ function App() {
               />
             </Show>
           </div>
+
+
 
         </div>
 

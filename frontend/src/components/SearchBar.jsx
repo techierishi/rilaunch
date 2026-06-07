@@ -48,6 +48,14 @@ function SearchBar(props) {
           spellcheck={false}
         />
       </div>
+
+      <button class="search-menu-btn" onClick={props.onMenuClick} title="Menu">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <circle cx="8" cy="3" r="1.5" />
+          <circle cx="8" cy="8" r="1.5" />
+          <circle cx="8" cy="13" r="1.5" />
+        </svg>
+      </button>
     </div>
   );
 }

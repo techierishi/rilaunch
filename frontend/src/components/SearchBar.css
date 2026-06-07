@@ -95,3 +95,29 @@
   color: #b0b8c8;
   white-space: pre;
 }
+
+.search-menu-btn {
+  background: none;
+  border: none;
+  color: #c0c0cc;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+
+.search-menu-btn:hover {
+  color: #808090;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  .search-menu-btn:hover {
+    color: #e0e0e0;
+    background: rgba(255, 255, 255, 0.1);
+  }
+}

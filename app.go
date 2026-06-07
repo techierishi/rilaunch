@@ -106,6 +106,15 @@ func (a *App) ToggleClipSecret(hash string) error {
 	return clipm.MarkSecret(hash)
 }
 
+func (a *App) ClearClipboard() error {
+	clipDb := config.GetInstance()
+	clipm := &clipm.ClipM{
+		DB: clipDb.DB,
+	}
+	return clipm.DeleteBucket()
+}
+
+
 
 func (a *App) GetAllApps() string {
 	apps, err := a.appManager.GetAllApps()

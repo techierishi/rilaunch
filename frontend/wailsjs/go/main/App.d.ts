@@ -3,6 +3,8 @@
 
 export function ChooseNotesDir():Promise<string>;
 
+export function ClearClipboard():Promise<void>;
+
 export function DeleteNote(arg1:string):Promise<void>;
 
 export function ExecuteCommand(arg1:string):Promise<string>;

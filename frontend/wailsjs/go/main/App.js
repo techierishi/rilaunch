@@ -6,6 +6,10 @@ export function ChooseNotesDir() {
   return window['go']['main']['App']['ChooseNotesDir']();
 }
 
+export function ClearClipboard() {
+  return window['go']['main']['App']['ClearClipboard']();
+}
+
 export function DeleteNote(arg1) {
   return window['go']['main']['App']['DeleteNote'](arg1);
 }

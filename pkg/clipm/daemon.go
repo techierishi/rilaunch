@@ -4,18 +4,17 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"reflect"
 	"rilaunch/pkg/config"
 	"strings"
 
 	"rilaunch/pkg/util"
 
-	"golang.design/x/clipboard"
+	goclipboard "golang.design/x/clipboard"
 )
 
-// ClipboardEventCallback is a function type for clipboard event notifications
 type ClipboardEventCallback func()
 
-// Global callback for UI refresh
 var refreshCallback ClipboardEventCallback
 
 type Clip struct {
@@ -38,21 +37,34 @@ func Record(ctx context.Context) error {
 	logger := util.GetLogInstance()
 	logger.Info().Msg("Clipboard recording started...")
 
-	err := clipboard.Init()
+	err := goclipboard.Init()
 	if err != nil {
 		panic(err)
 	}
 
-	ch := clipboard.Watch(ctx, clipboard.FmtText)
+	ch := goclipboard.Watch(ctx, goclipboard.FmtText)
 
-	for data := range ch {
+	for incomingData := range ch {
+		var rawBytes []byte
+
+		val := reflect.ValueOf(incomingData)
+		if val.Kind() == reflect.Struct {
+			for i := 0; i < val.NumField(); i++ {
+				if val.Field(i).Kind() == reflect.Slice && val.Field(i).Type().Elem().Kind() == reflect.Uint8 {
+					rawBytes = val.Field(i).Bytes()
+					break
+				}
+			}
+		} else if val.Kind() == reflect.Slice {
+			rawBytes = val.Bytes()
+		}
 
 		clipDb := config.GetInstance()
 		clipm := ClipM{
 			DB: clipDb.DB,
 		}
 
-		copiedStr := string(data)
+		copiedStr := string(rawBytes)
 		if len(strings.TrimSpace(copiedStr)) == 0 {
 			continue
 		}
@@ -70,11 +82,9 @@ func Record(ctx context.Context) error {
 		logger.Info().Msg(string(str + "... COPIED!"))
 		fmt.Printf("📋 Saving to clipdb: %s...\n", string(str))
 
-		// Trigger UI refresh if callback is set
 		if refreshCallback != nil {
 			refreshCallback()
 		}
-
 	}
 
 	return nil

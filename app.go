@@ -125,8 +125,6 @@ func (a *App) ClearClipboard() error {
 	return err
 }
 
-
-
 func (a *App) GetAllApps() string {
 	apps, err := a.appManager.GetAllApps()
 	if err != nil {
@@ -246,8 +244,8 @@ func (a *App) GetLastOutput() string {
 
 // ── Notes ─────────────────────────────────────────────────────────────────────
 
-func (a *App) SaveNote(content, tag string) string {
-	note, err := a.notesStore.Save(content, tag)
+func (a *App) SaveNote(content string) string {
+	note, err := a.notesStore.Save(content)
 	if err != nil {
 		return `{"error":"` + err.Error() + `"}`
 	}
@@ -268,8 +266,8 @@ func (a *App) DeleteNote(id string) error {
 	return a.notesStore.Delete(id)
 }
 
-func (a *App) UpdateNote(id, content, tag string) string {
-	note, err := a.notesStore.Update(id, content, tag)
+func (a *App) UpdateNote(id, content string) string {
+	note, err := a.notesStore.Update(id, content)
 	if err != nil {
 		return `{"error":"` + err.Error() + `"}`
 	}

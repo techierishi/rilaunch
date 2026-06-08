@@ -58,8 +58,8 @@ export function RegisterHotKey() {
   return window['go']['main']['App']['RegisterHotKey']();
 }
 
-export function SaveNote(arg1, arg2) {
-  return window['go']['main']['App']['SaveNote'](arg1, arg2);
+export function SaveNote(arg1) {
+  return window['go']['main']['App']['SaveNote'](arg1);
 }
 
 export function SearchApps(arg1) {
@@ -70,6 +70,6 @@ export function ToggleClipSecret(arg1) {
   return window['go']['main']['App']['ToggleClipSecret'](arg1);
 }
 
-export function UpdateNote(arg1, arg2, arg3) {
-  return window['go']['main']['App']['UpdateNote'](arg1, arg2, arg3);
+export function UpdateNote(arg1, arg2) {
+  return window['go']['main']['App']['UpdateNote'](arg1, arg2);
 }

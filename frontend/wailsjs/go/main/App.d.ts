@@ -29,10 +29,10 @@ export function LaunchApp(arg1:string):Promise<void>;
 
 export function RegisterHotKey():Promise<void>;
 
-export function SaveNote(arg1:string,arg2:string):Promise<string>;
+export function SaveNote(arg1:string):Promise<string>;
 
 export function SearchApps(arg1:string):Promise<string>;
 
 export function ToggleClipSecret(arg1:string):Promise<void>;
 
-export function UpdateNote(arg1:string,arg2:string,arg3:string):Promise<string>;
+export function UpdateNote(arg1:string,arg2:string):Promise<string>;

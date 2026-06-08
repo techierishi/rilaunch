@@ -1,22 +1,30 @@
 package notes
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/adrg/frontmatter"
 )
 
-// Note is stored as a markdown file with a simple YAML frontmatter header.
-// File name: {id}.md   Location: NotesStore.Dir
+// Note is the application-side representation of a note
 type Note struct {
 	ID        string    `json:"id"`
-	Tag       string    `json:"tag"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// NoteMeta maps strictly to the YAML frontmatter block inside the markdown files
+type NoteMeta struct {
+	ID        string    `yaml:"id"`
+	CreatedAt time.Time `yaml:"created"`
+	UpdatedAt time.Time `yaml:"updated"`
 }
 
 type NotesStore struct {
@@ -34,8 +42,8 @@ func notePath(dir, id string) string {
 }
 
 func serializeNote(n *Note) []byte {
-	fm := fmt.Sprintf("---\nid: %s\ntag: %s\ncreated: %s\nupdated: %s\n---\n",
-		n.ID, n.Tag,
+	fm := fmt.Sprintf("---\nid: %s\ncreated: %s\nupdated: %s\n---\n",
+		n.ID,
 		n.CreatedAt.UTC().Format(time.RFC3339),
 		n.UpdatedAt.UTC().Format(time.RFC3339),
 	)
@@ -43,39 +51,21 @@ func serializeNote(n *Note) []byte {
 }
 
 func deserializeNote(raw string) (*Note, error) {
-	if !strings.HasPrefix(raw, "---\n") {
-		return nil, fmt.Errorf("missing frontmatter")
-	}
-	rest := raw[4:]
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
-		return nil, fmt.Errorf("unclosed frontmatter")
-	}
-	fm := rest[:end]
-	body := rest[end+5:] // skip "\n---\n"
+	var meta NoteMeta
 
-	meta := make(map[string]string)
-	for _, line := range strings.Split(fm, "\n") {
-		if p := strings.SplitN(line, ": ", 2); len(p) == 2 {
-			meta[strings.TrimSpace(p[0])] = strings.TrimSpace(p[1])
-		}
+	// frontmatter.Parse reads the YAML frontmatter block into our struct,
+	// and returns the rest of the file contents as the markdown body.
+	body, err := frontmatter.Parse(bytes.NewReader([]byte(raw)), &meta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
 
-	note := &Note{
-		ID:      meta["id"],
-		Tag:     meta["tag"],
-		Content: body,
-	}
-	if note.Tag == "" {
-		note.Tag = "Note"
-	}
-	if t, err := time.Parse(time.RFC3339, meta["created"]); err == nil {
-		note.CreatedAt = t
-	}
-	if t, err := time.Parse(time.RFC3339, meta["updated"]); err == nil {
-		note.UpdatedAt = t
-	}
-	return note, nil
+	return &Note{
+		ID:        meta.ID,
+		Content:   string(body),
+		CreatedAt: meta.CreatedAt,
+		UpdatedAt: meta.UpdatedAt,
+	}, nil
 }
 
 func readNoteFile(path string) (*Note, error) {
@@ -88,39 +78,56 @@ func readNoteFile(path string) (*Note, error) {
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
-func (s *NotesStore) Save(content, tag string) (*Note, error) {
+func (s *NotesStore) Save(content string) (*Note, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, fmt.Errorf("content cannot be empty")
-	}
-	if tag == "" {
-		tag = "Note"
 	}
 	if err := s.EnsureDir(); err != nil {
 		return nil, err
 	}
 
 	now := time.Now()
-	note := &Note{
-		ID:        fmt.Sprintf("%d", now.UnixNano()),
-		Tag:       tag,
-		Content:   content,
-		CreatedAt: now,
-		UpdatedAt: now,
+	id := now.Format("02_Jan_2006")
+	path := notePath(s.Dir, id)
+
+	_, err := os.Stat(path)
+	exists := !os.IsNotExist(err)
+
+	var note *Note
+
+	if exists {
+		existingNote, err := readNoteFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read existing note for append: %w", err)
+		}
+
+		note = &Note{
+			ID:        id,
+			Content:   existingNote.Content + "\n\n" + content,
+			CreatedAt: existingNote.CreatedAt,
+			UpdatedAt: now,
+		}
+	} else {
+		note = &Note{
+			ID:        id,
+			Content:   content,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
 	}
-	if err := os.WriteFile(notePath(s.Dir, note.ID), serializeNote(note), 0o600); err != nil {
+
+	if err := os.WriteFile(path, serializeNote(note), 0o600); err != nil {
 		return nil, err
 	}
+
 	return note, nil
 }
 
-func (s *NotesStore) Update(id, content, tag string) (*Note, error) {
+func (s *NotesStore) Update(id, content string) (*Note, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, fmt.Errorf("content cannot be empty")
-	}
-	if tag == "" {
-		tag = "Note"
 	}
 
 	path := notePath(s.Dir, id)
@@ -129,7 +136,6 @@ func (s *NotesStore) Update(id, content, tag string) (*Note, error) {
 		return nil, fmt.Errorf("note not found: %s", id)
 	}
 
-	note.Tag = tag
 	note.Content = content
 	note.UpdatedAt = time.Now()
 

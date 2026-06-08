@@ -1,6 +1,17 @@
 import { createSignal, createEffect, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import Fuse from 'fuse.js';
-import { GetClipData, GetAllApps, LaunchApp, ExecuteCommand, GetNotes, SaveNote, DeleteNote, UpdateNote, ToggleClipSecret, ClearClipboard } from '../wailsjs/go/main/App';
+import {
+  GetClipData,
+  GetAllApps,
+  LaunchApp,
+  ExecuteCommand,
+  GetNotes,
+  SaveNote,
+  DeleteNote,
+  UpdateNote,
+  ToggleClipSecret,
+  ClearClipboard
+} from '../wailsjs/go/main/App';
 import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
 import ClipboardView from './components/ClipboardView';
@@ -9,104 +20,19 @@ import CommandExecutor from './components/CommandExecutor';
 import NotesView from './components/NotesView';
 import SettingsView from './components/SettingsView';
 import StatusBar from './components/StatusBar';
+import { IconApps, IconClipboard, IconTerminal, IconNotes, IconSettings, IconRefresh, IconTrash, IconClear, IconHistory, IconFolder, IconSettingsSmall } from './components/Icons';
 import './App.css';
-
-// ── Flat SVG icons ────────────────────────────────────────────────────────────
-
-const IconApps = () => (
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
-    <rect x="1"   y="1"   width="5.5" height="5.5" rx="1.2"/>
-    <rect x="8.5" y="1"   width="5.5" height="5.5" rx="1.2"/>
-    <rect x="1"   y="8.5" width="5.5" height="5.5" rx="1.2"/>
-    <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.2"/>
-  </svg>
-);
-
-const IconClipboard = () => (
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="3.5" y="2" width="8" height="11.5" rx="1.2"/>
-    <path d="M5.5 2V3a1 1 0 001 1h2a1 1 0 001-1V2"/>
-  </svg>
-);
-
-const IconTerminal = () => (
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <polyline points="2.5,4.5 6.5,7.5 2.5,10.5"/>
-    <line x1="8.5" y1="10.5" x2="12.5" y2="10.5"/>
-  </svg>
-);
-
-const IconNotes = () => (
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M3 2h9a1 1 0 011 1v7.5L10.5 13H3a1 1 0 01-1-1V3a1 1 0 011-1z"/>
-    <line x1="4.5" y1="5.5" x2="10.5" y2="5.5"/>
-    <line x1="4.5" y1="8" x2="8" y2="8"/>
-  </svg>
-);
-
-const IconSettings = () => (
-  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="7" cy="7" r="2"/>
-    <path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.93 2.93l1.06 1.06M10.01 10.01l1.06 1.06M2.93 11.07l1.06-1.06M10.01 3.99l1.06-1.06"/>
-  </svg>
-);
-
-const IconRefresh = () => (
-  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M1.5 4.5h3v-3M13.5 10.5h-3v3"/>
-    <path d="M12.4 4.5A5.5 5.5 0 004.2 2L1.5 4.5M13.5 10.5l-2.7 2.5a5.5 5.5 0 01-8.2-2.5"/>
-  </svg>
-);
-
-const IconTrash = () => (
-  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M2.5 3.5h10M4.5 3.5v-1a1 1 0 011-1h4a1 1 0 011 1v1M11.5 3.5v9a1 1 0 01-1 1h-6a1 1 0 01-1-1v-9"/>
-    <line x1="6" y1="6" x2="6" y2="10"/>
-    <line x1="9" y1="6" x2="9" y2="10"/>
-  </svg>
-);
-
-const IconClear = () => (
-  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="7.5" cy="7.5" r="5.5"/>
-    <line x1="3.5" y1="3.5" x2="11.5" y2="11.5"/>
-  </svg>
-);
-
-const IconSettingsSmall = () => (
-  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="7.5" cy="7.5" r="1.5"/>
-    <path d="M7.5 1v1.5M7.5 12.5V14M1 7.5h1.5M12.5 7.5H14"/>
-  </svg>
-);
-
-const IconLock = () => (
-  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="3.5" y="6.5" width="8" height="6" rx="1"/>
-    <path d="M5.5 6.5V4.5a2 2 0 1 1 4 0v2"/>
-  </svg>
-);
-
-const IconHistory = () => (
-  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="7.5" cy="7.5" r="5.5"/>
-    <polyline points="7.5,4.5 7.5,7.5 9.5,8.5"/>
-  </svg>
-);
-
-const IconFolder = () => (
-  <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M1.5 2.5h4l1.5 1.5h6.5v8.5a1 1 0 01-1 1h-11a1 1 0 01-1-1z"/>
-  </svg>
-);
 
 // ── Shell history helpers ─────────────────────────────────────────────────────
 
 const SHELL_HISTORY_KEY = 'rilaunch_shell_history';
 
 function loadShellHistory() {
-  try { return JSON.parse(localStorage.getItem(SHELL_HISTORY_KEY) || '[]'); }
-  catch { return []; }
+  try {
+    return JSON.parse(localStorage.getItem(SHELL_HISTORY_KEY) || '[]');
+  } catch {
+    return [];
+  }
 }
 
 function saveShellHistoryItem(cmd) {
@@ -114,6 +40,7 @@ function saveShellHistoryItem(cmd) {
   hist.unshift(cmd);
   localStorage.setItem(SHELL_HISTORY_KEY, JSON.stringify(hist.slice(0, 50)));
 }
+
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
@@ -135,7 +62,11 @@ function App() {
   const [isMenuOpen, setIsMenuOpen] = createSignal(false);
   const [statusMsg, setStatusMsg] = createSignal('');
   const [statusColor, setStatusColor] = createSignal('info');
+
   let statusTimer;
+  let searchInputRef;
+  let clipboardLoadId = 0;
+  let notesLoadId = 0;
 
   const showStatus = (msg, type = 'info') => {
     clearTimeout(statusTimer);
@@ -143,8 +74,6 @@ function App() {
     setStatusColor(type);
     statusTimer = setTimeout(() => setStatusMsg(''), 2500);
   };
-
-  let searchInputRef;
 
   // ── Fuse index (rebuilt only when allApps changes) ────────────────────────
   const fuseIndex = createMemo(() =>
@@ -178,7 +107,6 @@ function App() {
     );
   });
 
-  // Inline autocomplete: first history item starting with current input
   const shellSuggestion = createMemo(() => {
     if (activeTab() !== 'shell') return '';
     const q = searchQuery().trim();
@@ -189,32 +117,47 @@ function App() {
   // ── Search bar config per tab ─────────────────────────────────────────────
   const searchPlaceholder = () => {
     switch (activeTab()) {
-      case 'apps':      return 'Search applications...';
+      case 'apps': return 'Search applications...';
       case 'clipboard': return 'Filter clipboard...';
-      case 'shell':     return 'Enter shell command...';
-      case 'notes':     return 'Search notes...';
-      default:          return 'Search...';
+      case 'shell': return 'Enter shell command...';
+      case 'notes': return 'Search notes...';
+      default: return 'Search...';
     }
   };
 
   // ── Tab switching ─────────────────────────────────────────────────────────
   const switchTab = (tab) => {
-    setActiveTab(tab);
-    setSearchQuery('');
-    setSelectedIndex(0);
-    setClipboardSelectedIndex(0);
-    setShellHistoryIndex(-1);
-    if (tab === 'clipboard') loadClipboardData();
-    if (tab === 'notes')     loadNotes();
-    setTimeout(() => { if (searchInputRef) searchInputRef.focus(); }, 30);
+    const sameTab = activeTab() === tab;
+
+    setShowSettings(false);
+    setIsMenuOpen(false);
+
+    if (!sameTab) {
+      setActiveTab(tab);
+      setSearchQuery('');
+      setSelectedIndex(0);
+      setClipboardSelectedIndex(0);
+      setShellHistoryIndex(-1);
+    }
+
+    if (tab === 'clipboard') queueMicrotask(() => void loadClipboardData());
+    if (tab === 'notes') queueMicrotask(() => void loadNotes());
+
+    setTimeout(() => {
+      searchInputRef?.focus();
+    }, 30);
   };
 
   // ── Data loaders ──────────────────────────────────────────────────────────
   const loadClipboardData = async () => {
+    const requestId = ++clipboardLoadId;
     try {
       const raw = await GetClipData('');
-      setClipboardData(JSON.parse(raw));
-    } catch (e) { console.error(e); }
+      if (requestId !== clipboardLoadId) return;
+      setClipboardData(JSON.parse(raw || '[]'));
+    } catch (e) {
+      console.error('Failed to load clipboard:', e);
+    }
   };
 
   const loadAllApps = async () => {
@@ -222,12 +165,12 @@ function App() {
       const raw = await GetAllApps();
       const parsed = JSON.parse(raw || '[]');
       const mapped = parsed.map(app => ({
-        id:       app.id,
-        title:    app.displayName || app.name,
+        id: app.id,
+        title: app.displayName || app.name,
         subtitle: app.description || 'Application',
-        icon:     app.icon || '',
+        icon: app.icon || '',
         category: app.category || 'App',
-        appData:  app,
+        appData: app,
       }));
       setAllApps(mapped);
       if (mapped.length === 0) setTimeout(loadAllApps, 1500);
@@ -238,16 +181,24 @@ function App() {
   };
 
   const loadNotes = async () => {
+    const requestId = ++notesLoadId;
     try {
       const raw = await GetNotes();
+      if (requestId !== notesLoadId) return;
       setNotesList(JSON.parse(raw || '[]'));
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error('Failed to load notes:', e);
+    }
   };
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const handleAppLaunch = async (command) => {
     if (command?.appData) {
-      try { await LaunchApp(command.appData.id); } catch (e) { console.error(e); }
+      try {
+        await LaunchApp(command.appData.id);
+      } catch (e) {
+        console.error(e);
+      }
     }
   };
 
@@ -296,51 +247,73 @@ function App() {
   };
 
   const handleReloadNotes = async () => {
-    await loadNotes();
+    void loadNotes();
     showStatus('Notes reloaded', 'success');
   };
 
-
-
   const handleSaveNote = async (content, tag) => {
-    try { await SaveNote(content, tag); await loadNotes(); showStatus('Note saved', 'success'); }
-    catch (e) { console.error(e); showStatus('Failed to save', 'error'); }
+    try {
+      await SaveNote(content, tag);
+      await loadNotes();
+      showStatus('Note saved', 'success');
+    } catch (e) {
+      console.error(e);
+      showStatus('Failed to save', 'error');
+    }
   };
 
   const handleDeleteNote = async (id) => {
-    try { await DeleteNote(id); await loadNotes(); showStatus('Note deleted'); }
-    catch (e) { console.error(e); }
+    try {
+      await DeleteNote(id);
+      await loadNotes();
+      showStatus('Note deleted');
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleUpdateNote = async (id, content, tag) => {
-    try { await UpdateNote(id, content, tag); await loadNotes(); showStatus('Note updated', 'success'); }
-    catch (e) { console.error(e); showStatus('Failed to update', 'error'); }
+    try {
+      await UpdateNote(id, content, tag);
+      await loadNotes();
+      showStatus('Note updated', 'success');
+    } catch (e) {
+      console.error(e);
+      showStatus('Failed to update', 'error');
+    }
   };
 
   // ── Keyboard handler ──────────────────────────────────────────────────────
   const handleKeyDown = async (e) => {
     // Escape: clear query or quit
     if (e.key === 'Escape') {
-      if (searchQuery() !== '') { setSearchQuery(''); setShellHistoryIndex(-1); return; }
+      if (searchQuery() !== '') {
+        setSearchQuery('');
+        setShellHistoryIndex(-1);
+        return;
+      }
       Quit();
       return;
     }
 
-    // Tab / Shift+Tab: cycle plugins (skip inside form fields)
-    if (e.key === 'Tab' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') {
+    // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
       e.preventDefault();
+      e.stopPropagation();
+
       const cur = TABS.indexOf(activeTab());
       const next = e.shiftKey
         ? (cur - 1 + TABS.length) % TABS.length
         : (cur + 1) % TABS.length;
+
       switchTab(TABS[next]);
       return;
     }
 
-    // ⌘1-4: switch tabs
-    if ((e.metaKey || e.ctrlKey) && ['1','2','3','4'].includes(e.key)) {
+    // Ctrl/Cmd + 1..4: direct switch
+    if ((e.metaKey || e.ctrlKey) && ['1', '2', '3', '4'].includes(e.key)) {
       e.preventDefault();
-      switchTab(TABS[parseInt(e.key) - 1]);
+      switchTab(TABS[parseInt(e.key, 10) - 1]);
       return;
     }
 
@@ -354,7 +327,7 @@ function App() {
         setShellHistory(loadShellHistory());
         setShellHistoryIndex(-1);
         setSearchQuery('');
-        handleCommandExecute(cmd);
+        void handleCommandExecute(cmd);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const hist = shellHistory();
@@ -365,14 +338,20 @@ function App() {
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
         const next = shellHistoryIndex() - 1;
-        if (next < 0) { setShellHistoryIndex(-1); setSearchQuery(''); return; }
+        if (next < 0) {
+          setShellHistoryIndex(-1);
+          setSearchQuery('');
+          return;
+        }
         setShellHistoryIndex(next);
         setSearchQuery(shellHistory()[next]);
       } else if (e.key === 'ArrowRight') {
-        // Accept inline ghost suggestion when cursor is at end
         const sug = shellSuggestion();
-        if (sug && searchInputRef &&
-            searchInputRef.selectionEnd === (searchInputRef.value || '').length) {
+        if (
+          sug &&
+          searchInputRef &&
+          searchInputRef.selectionEnd === (searchInputRef.value || '').length
+        ) {
           e.preventDefault();
           setSearchQuery(sug);
           setShellHistoryIndex(-1);
@@ -396,7 +375,10 @@ function App() {
       } else if (e.key === 'Enter') {
         e.preventDefault();
         const item = data[clipboardSelectedIndex()];
-        if (item) { navigator.clipboard.writeText(item.content || item.text || ''); WindowHide(); }
+        if (item) {
+          navigator.clipboard.writeText(item.content || item.text || '');
+          WindowHide();
+        }
       }
       return;
     }
@@ -416,32 +398,31 @@ function App() {
   };
 
   // ── Effects ───────────────────────────────────────────────────────────────
-  // Reset selection when query changes
   createEffect(() => {
-    const _ = searchQuery();
+    searchQuery();
     setSelectedIndex(0);
     setClipboardSelectedIndex(0);
   });
 
   onMount(() => {
-    // Use capture phase so our Tab/Esc handler fires before any element's own keydown,
-    // preventing browser-native focus navigation from stealing Tab on the clipboard page.
     document.addEventListener('keydown', handleKeyDown, true);
     EventsOn('Backend:GlobalHotkeyEvent', () => WindowShow());
-    EventsOn('ClipboardUpdated', () => loadClipboardData());
-    loadAllApps();
-    if (searchInputRef) searchInputRef.focus();
+    EventsOn('ClipboardUpdated', () => {
+      if (activeTab() === 'clipboard') void loadClipboardData();
+    });
+    void loadAllApps();
+    searchInputRef?.focus();
   });
 
   onCleanup(() => {
     document.removeEventListener('keydown', handleKeyDown, true);
+    clearTimeout(statusTimer);
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div class="app" onClick={() => setIsMenuOpen(false)}>
       <div class="main-container">
-
         <div class="search-section">
           <SearchBar
             ref={searchInputRef}
@@ -450,7 +431,10 @@ function App() {
             placeholder={searchPlaceholder()}
             isShellMode={activeTab() === 'shell'}
             suggestion={shellSuggestion()}
-            onMenuClick={(e) => { e.stopPropagation(); setIsMenuOpen(o => !o); }}
+            onMenuClick={(e) => {
+              e.stopPropagation();
+              setIsMenuOpen(o => !o);
+            }}
           />
 
           <Show when={isMenuOpen() && !showSettings()}>
@@ -461,9 +445,10 @@ function App() {
                 {activeTab() === 'shell' && 'Terminal'}
                 {activeTab() === 'notes' && 'Notes'}
               </span>
+
               <div class="menu-list">
                 <Show when={activeTab() === 'apps'}>
-                  <button class="menu-item" onClick={() => { setIsMenuOpen(false); loadAllApps(); }}>
+                  <button class="menu-item" onClick={() => { setIsMenuOpen(false); void loadAllApps(); }}>
                     <IconRefresh />
                     <span>Refresh Apps</span>
                   </button>
@@ -472,12 +457,14 @@ function App() {
                     <span>App Settings</span>
                   </button>
                 </Show>
+
                 <Show when={activeTab() === 'clipboard'}>
-                  <button class="menu-item danger" onClick={() => { setIsMenuOpen(false); handleClearClipboard(); }}>
+                  <button class="menu-item danger" onClick={() => { setIsMenuOpen(false); void handleClearClipboard(); }}>
                     <IconTrash />
                     <span>Clear All</span>
                   </button>
                 </Show>
+
                 <Show when={activeTab() === 'shell'}>
                   <button class="menu-item" onClick={() => { setIsMenuOpen(false); handleClearConsole(); }}>
                     <IconClear />
@@ -488,8 +475,9 @@ function App() {
                     <span>History Limit</span>
                   </button>
                 </Show>
+
                 <Show when={activeTab() === 'notes'}>
-                  <button class="menu-item" onClick={() => { setIsMenuOpen(false); handleReloadNotes(); }}>
+                  <button class="menu-item" onClick={() => { setIsMenuOpen(false); void handleReloadNotes(); }}>
                     <IconRefresh />
                     <span>Reload Notes</span>
                   </button>
@@ -504,21 +492,60 @@ function App() {
         </div>
 
         <div class="body-section">
-
           <div class="sidebar">
-            <button class={"tab-btn" + (activeTab() === 'apps'      ? ' active' : '')} onClick={() => switchTab('apps')}      title="Applications ⌘1"><IconApps /></button>
-            <button class={"tab-btn" + (activeTab() === 'clipboard' ? ' active' : '')} onClick={() => switchTab('clipboard')} title="Clipboard ⌘2"><IconClipboard /></button>
-            <button class={"tab-btn" + (activeTab() === 'notes'     ? ' active' : '')} onClick={() => switchTab('notes')}     title="Notes ⌘3"><IconNotes /></button>
-            <button class={"tab-btn" + (activeTab() === 'shell'     ? ' active' : '')} onClick={() => switchTab('shell')}     title="Shell ⌘4"><IconTerminal /></button>
+            <button
+              class={"tab-btn" + (activeTab() === 'apps' && !showSettings() ? ' active' : '')}
+              onClick={() => switchTab('apps')}
+              title="Applications Ctrl+1"
+            >
+              <IconApps />
+            </button>
+
+            <button
+              class={"tab-btn" + (activeTab() === 'clipboard' && !showSettings() ? ' active' : '')}
+              onClick={() => switchTab('clipboard')}
+              title="Clipboard Ctrl+2"
+            >
+              <IconClipboard />
+            </button>
+
+            <button
+              class={"tab-btn" + (activeTab() === 'notes' && !showSettings() ? ' active' : '')}
+              onClick={() => switchTab('notes')}
+              title="Notes Ctrl+3"
+            >
+              <IconNotes />
+            </button>
+
+            <button
+              class={"tab-btn" + (activeTab() === 'shell' && !showSettings() ? ' active' : '')}
+              onClick={() => switchTab('shell')}
+              title="Shell Ctrl+4"
+            >
+              <IconTerminal />
+            </button>
+
             <div class="sidebar-spacer" />
-            <button class={"tab-btn settings-btn" + (showSettings() ? ' active' : '')} onClick={() => setShowSettings(s => !s)} title="Settings"><IconSettings /></button>
+
+            <button
+              class={"tab-btn settings-btn" + (showSettings() ? ' active' : '')}
+              onClick={() => {
+                setIsMenuOpen(false);
+                setShowSettings(s => !s);
+                setTimeout(() => searchInputRef?.focus(), 30);
+              }}
+              title="Settings"
+            >
+              <IconSettings />
+            </button>
           </div>
 
           <div class="content-panel">
             <Show when={showSettings()}>
               <SettingsView onClose={() => setShowSettings(false)} />
             </Show>
-            <Show when={activeTab() === 'apps'}>
+
+            <Show when={!showSettings() && activeTab() === 'apps'}>
               <ApplicationView
                 apps={filteredApps()}
                 selectedIndex={selectedIndex()}
@@ -526,7 +553,8 @@ function App() {
                 onLaunch={handleAppLaunch}
               />
             </Show>
-            <Show when={activeTab() === 'clipboard'}>
+
+            <Show when={!showSettings() && activeTab() === 'clipboard'}>
               <ClipboardView
                 clipboardData={clipboardData()}
                 filteredClipboardData={filteredClipboardData()}
@@ -535,13 +563,15 @@ function App() {
                 onToggleSecret={handleToggleSecret}
               />
             </Show>
-            <Show when={activeTab() === 'shell'}>
+
+            <Show when={!showSettings() && activeTab() === 'shell'}>
               <CommandExecutor
                 output={commandOutput()}
                 isLoading={isExecuting()}
               />
             </Show>
-            <Show when={activeTab() === 'notes'}>
+
+            <Show when={!showSettings() && activeTab() === 'notes'}>
               <NotesView
                 notes={filteredNotes()}
                 onSave={handleSaveNote}
@@ -551,13 +581,13 @@ function App() {
               />
             </Show>
           </div>
-
-
-
         </div>
 
-        <StatusBar activeTab={activeTab()} statusMsg={statusMsg()} statusColor={statusColor()} />
-
+        <StatusBar
+          activeTab={showSettings() ? 'settings' : activeTab()}
+          statusMsg={statusMsg()}
+          statusColor={statusColor()}
+        />
       </div>
     </div>
   );

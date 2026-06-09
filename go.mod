@@ -9,7 +9,7 @@ require (
 	github.com/wailsapp/wails/v2 v2.12.0
 	go.etcd.io/bbolt v1.4.3
 	golang.design/x/clipboard v0.8.0
-	golang.design/x/hotkey v0.6.1
+	golang.design/x/hotkey v0.4.1 // After this version, MacOS needs Input Monitoring access.
 )
 
 require (

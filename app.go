@@ -28,7 +28,6 @@ type App struct {
 	wailsApp     *application.App
 	mainWindow   *application.WebviewWindow
 	refreshCh    chan bool
-	isVisible    bool
 	clipData     []clipm.ClipInfo
 	filteredData []clipm.ClipInfo
 	appManager   *appm.Manager
@@ -37,6 +36,8 @@ type App struct {
 	notesStore   *notes.NotesStore
 	iconCache    map[string]string
 	iconMu       sync.RWMutex
+	visible      bool
+	ready        bool
 }
 
 func NewApp() *App {
@@ -162,7 +163,7 @@ func (a *App) LaunchApp(appID string) error {
 		return err
 	}
 
-	a.hideWindow()
+	a.Hide()
 	return nil
 }
 
@@ -366,57 +367,77 @@ func extractMacOSIconBase64(appPath string) string {
 }
 
 func registerHotkey(a *App) {
-	hk := hotkey.New([]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModShift}, hotkey.KeySpace)
-	err := hk.Register()
-	if err != nil {
-		fmt.Printf("Failed to register hotkey: %v\n", err)
+	hk := hotkey.New(
+		[]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModShift},
+		hotkey.KeySpace,
+	)
+
+	if err := hk.Register(); err != nil {
 		return
 	}
 
-	fmt.Printf("hotkey: %v is registered\n", hk)
-
 	for {
 		select {
-		case <-hk.Keydown():
-			fmt.Printf("hotkey: %v is down\n", hk)
 		case <-hk.Keyup():
-			fmt.Printf("hotkey: %v is up\n", hk)
-
-			if a.isVisible {
-				a.hideWindow()
+			if a.visible {
+				a.Hide()
 			} else {
-				a.showWindow()
+				a.Show()
 			}
-
-			select {
-			case a.refreshCh <- true:
-			default:
-			}
-		case <-time.After(30 * time.Second):
-			continue
 		}
 	}
 }
 
-func (a *App) showWindow() {
-	a.isVisible = true
+func (a *App) makeWindow() *application.WebviewWindow {
+	return a.wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:  "main",
+		Title: "RiLaunch",
+		URL:   "/",
 
-	if a.mainWindow != nil {
-		a.mainWindow.Show()
-	}
+		Width:  700,
+		Height: 622,
 
-	if a.wailsApp != nil {
-		a.wailsApp.Event.Emit("Backend:GlobalHotkeyEvent", time.Now().String())
-	}
+		Frameless:     true,
+		DisableResize: true,
+		AlwaysOnTop:   true,
+
+		BackgroundType:   application.BackgroundTypeTransparent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+
+		Mac: application.MacWindow{},
+	})
 }
 
-func (a *App) hideWindow() {
-	a.isVisible = false
+func (a *App) Toggle() {
+	if a.visible {
+		a.Hide()
+		return
+	}
+	a.Show()
+}
 
-	if a.mainWindow != nil {
-		a.mainWindow.Hide()
+func (a *App) Show() {
+	if !a.ready || a.mainWindow == nil {
+		return
 	}
 
+	a.visible = true
+
+	a.mainWindow.Hide()
+
+	a.mainWindow.Center()
+	a.wailsApp.Event.Emit("launcher:show", nil)
+	a.mainWindow.Show()
+	a.mainWindow.Focus()
+}
+
+func (a *App) Hide() {
+	if !a.ready || a.mainWindow == nil {
+		return
+	}
+
+	a.visible = false
+	a.mainWindow.Hide()
 	if a.wailsApp != nil {
 		a.wailsApp.Event.Emit("Backend:GlobalHotkeyEvent", time.Now().String())
 	}

@@ -1,5 +1,8 @@
 import { createSignal, createEffect, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import Fuse from 'fuse.js';
+import { Events } from '@wailsio/runtime'
+import { GetClipData, GetAllApps, GetNotes, LaunchApp, ToggleClipSecret, ClearClipboard } from "./bindings/rilaunch/app";
+
 import SearchBar from './components/SearchBar';
 import ClipboardView from './components/ClipboardView';
 import ApplicationView from './components/ApplicationView';
@@ -393,9 +396,14 @@ function App() {
 
   onMount(() => {
     document.addEventListener('keydown', handleKeyDown, true);
-    EventsOn('Backend:GlobalHotkeyEvent', () => WindowShow());
-    EventsOn('ClipboardUpdated', () => {
+    Events.On('Backend:GlobalHotkeyEvent', () => WindowShow());
+    Events.On('ClipboardUpdated', () => {
       if (activeTab() === 'clipboard') void loadClipboardData();
+    });
+    window.addEventListener("launcher:show", () => {
+      requestAnimationFrame(() => {
+        document.body.classList.add("visible");
+      });
     });
     void loadAllApps();
     searchInputRef?.focus();

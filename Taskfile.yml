@@ -33,93 +33,93 @@ tasks:
     cmds:
       - npm run build
 
-  build:darwin:
-    summary: Builds the application
+  darwin:build:
+    summary: Builds the application for macOS
     platforms:
       - darwin
     cmds:
-     - task: pre-build
-     - task: build-frontend
-     - go build -gcflags=all="-N -l" -o bin/rilaunch
-     - task: post-build
+      - task: pre-build
+      - task: build-frontend
+      - go build -gcflags=all="-N -l" -o bin/rilaunch
+      - task: post-build
     env:
       CGO_CFLAGS: "-mmacosx-version-min=10.13"
       CGO_LDFLAGS: "-mmacosx-version-min=10.13"
       MACOSX_DEPLOYMENT_TARGET: "10.13"
 
-  build:windows:
+  windows:build:
     summary: Builds the application for Windows
     platforms:
       - windows
     cmds:
       - task: pre-build
-      - task: build-frontend     
+      - task: build-frontend
       - go build -gcflags=all="-N -l" -o bin/rilaunch.exe
       - task: post-build
 
   build:
-    summary: Builds the application
+    summary: Builds all supported platforms
     cmds:
-      - task: build:darwin
-      - task: build:windows
+      - task: darwin:build
+      - task: windows:build
 
   generate-icons:
-    summary: Generates Windows `.ico` and Mac `.icns` files from an image
+    summary: Generates Windows .ico and macOS .icns files from appicon.png
     dir: build
     cmds:
-      # Generates both .ico and .icns files
       - wails generate icons -input appicon.png
 
   build-app-prod-darwin:
-    summary: Creates a production build of the application
+    summary: Creates a production binary for macOS
+    vars:
+      ARCH: $GOARCH
+    env:
+      CGO_CFLAGS: "-mmacosx-version-min=10.13"
+      CGO_LDFLAGS: "-mmacosx-version-min=10.13"
+      MACOSX_DEPLOYMENT_TARGET: "10.13"
     cmds:
       - task: pre-build
       - task: build-frontend
       - GOOS=darwin GOARCH={{.ARCH}} go build -tags production -ldflags="-w -s" -o build/bin/{{.APP_NAME}}
       - task: post-build
-    env:
-      CGO_CFLAGS: "-mmacosx-version-min=10.13"
-      CGO_LDFLAGS: "-mmacosx-version-min=10.13"
-      MACOSX_DEPLOYMENT_TARGET: "10.13"
-    vars:
-      ARCH: $GOARCH
-
 
   create-app-bundle:
-    summary: Builds a `.app` bundle
+    summary: Builds a macOS .app bundle
     cmds:
-      - mkdir -p {{.APP_NAME}}.app/Contents/{MacOS,Resources}
+      - mkdir -p {{.APP_NAME}}.app/Contents/MacOS
+      - mkdir -p {{.APP_NAME}}.app/Contents/Resources
       - cp build/icons.icns {{.APP_NAME}}.app/Contents/Resources
       - cp build/bin/{{.APP_NAME}} {{.APP_NAME}}.app/Contents/MacOS
       - cp build/Info.plist {{.APP_NAME}}.app/Contents
 
   package-darwin-arm64:
-    summary: Packages a production build of the application into a `.app` bundle
+    summary: Packages a production build into a macOS .app bundle
     platform: darwin
     deps:
       - task: build-app-prod-darwin
         vars:
-            ARCH: arm64
+          ARCH: arm64
       - generate-icons
     cmds:
       - task: create-app-bundle
 
   generate:syso:
+    summary: Generates Windows resource file
     dir: build
     platform: windows
-    cmds:
-      - wails generate syso -arch {{.ARCH}} -icon icon.ico -manifest wails.exe.manifest -info info.json -out ../wails.syso
     vars:
       ARCH: $GOARCH
+    cmds:
+      - wails generate syso -arch {{.ARCH}} -icon icon.ico -manifest wails.exe.manifest -info info.json -out ../wails.syso
 
-  package:windows:
-    summary: Packages a production build of the application into a `.exe` bundle
+  windows:package:
+    summary: Packages a production Windows executable
     platform: windows
     deps:
       - generate-icons
     cmds:
       - task: generate:syso
         vars:
-            ARCH: amd64
+          ARCH: amd64
       - go build -tags production -ldflags="-w -s -H windowsgui" -o bin/{{.APP_NAME}}.exe
-      - powershell Remove-item wails.syso
+      - powershell Remove-Item wails.syso

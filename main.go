@@ -15,7 +15,7 @@ func main() {
 	app := NewApp()
 
 	wailsApp := application.New(application.Options{
-		Name: "rilaunch",
+		Name: "RiLaunch",
 		Services: []application.Service{
 			application.NewService(app),
 		},
@@ -24,29 +24,12 @@ func main() {
 		},
 	})
 
-	// Create the window instance
-	mainWindow := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:          "main",
-		Title:         "RiLaunch",
-		URL:           "/",
-		Width:         700,
-		Height:        622,
-		Frameless:     true,
-		DisableResize: true,
-		AlwaysOnTop:   true,
-
-		BackgroundType:   application.BackgroundTypeTransparent,
-		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
-
-		Mac:     application.MacWindow{},
-		Windows: application.WindowsWindow{},
-		Linux:   application.LinuxWindow{},
-	})
-
 	app.SetApplication(wailsApp)
+	mainWindow := app.makeWindow()
 	app.SetMainWindow(mainWindow)
-
-	// Wails v3 Lifecycle: Execute startup tasks directly before calling Run()
+	mainWindow.Show()
+	mainWindow.Hide()
+	app.ready = true
 	app.startup(context.Background())
 
 	// Run the application loop

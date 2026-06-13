@@ -405,10 +405,10 @@ func (a *App) makeWindow() *application.WebviewWindow {
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 
 		Mac: application.MacWindow{
-			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
-				application.MacWindowCollectionBehaviorFullScreenAuxiliary,
-
-			WindowLevel: application.MacWindowLevelFloating,
+			// CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
+			// 	application.MacWindowCollectionBehaviorFullScreenAuxiliary,
+			CollectionBehavior: application.MacWindowCollectionBehaviorMoveToActiveSpace,
+			WindowLevel:        application.MacWindowLevelFloating,
 		},
 	})
 }

@@ -404,7 +404,12 @@ func (a *App) makeWindow() *application.WebviewWindow {
 		BackgroundType:   application.BackgroundTypeTransparent,
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 
-		Mac: application.MacWindow{},
+		Mac: application.MacWindow{
+			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
+				application.MacWindowCollectionBehaviorFullScreenAuxiliary,
+
+			WindowLevel: application.MacWindowLevelFloating,
+		},
 	})
 }
 
@@ -423,10 +428,10 @@ func (a *App) Show() {
 
 	a.visible = true
 
-	a.mainWindow.Hide()
-
-	a.mainWindow.Center()
 	a.wailsApp.Event.Emit("launcher:show", nil)
+	a.mainWindow.Hide()
+	time.Sleep(10 * time.Millisecond)
+	a.mainWindow.Center()
 	a.mainWindow.Show()
 	a.mainWindow.Focus()
 }

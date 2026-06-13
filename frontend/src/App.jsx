@@ -1,18 +1,5 @@
 import { createSignal, createEffect, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import Fuse from 'fuse.js';
-import {
-  GetClipData,
-  GetAllApps,
-  LaunchApp,
-  ExecuteCommand,
-  GetNotes,
-  SaveNote,
-  DeleteNote,
-  UpdateNote,
-  ToggleClipSecret,
-  ClearClipboard
-} from '../wailsjs/go/main/App';
-import { EventsOn, WindowHide, WindowShow, Quit } from '../wailsjs/runtime/runtime';
 import SearchBar from './components/SearchBar';
 import ClipboardView from './components/ClipboardView';
 import ApplicationView from './components/ApplicationView';

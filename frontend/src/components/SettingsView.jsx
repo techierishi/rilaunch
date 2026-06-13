@@ -1,5 +1,4 @@
 import { createSignal, onMount } from 'solid-js';
-import { GetNotesDir, ChooseNotesDir } from '../../wailsjs/go/main/App';
 import './SettingsView.css';
 
 function SettingsView(props) {

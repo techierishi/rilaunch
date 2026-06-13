@@ -18,13 +18,15 @@ import (
 	"sync"
 	"time"
 
-	wails_runtime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"golang.design/x/clipboard"
 	"golang.design/x/hotkey"
 )
 
 type App struct {
 	ctx          context.Context
+	wailsApp     *application.App
+	mainWindow   *application.WebviewWindow
 	refreshCh    chan bool
 	isVisible    bool
 	clipData     []clipm.ClipInfo
@@ -41,19 +43,31 @@ func NewApp() *App {
 	return &App{
 		appManager: appm.NewManager(),
 		iconCache:  make(map[string]string),
+		refreshCh:  make(chan bool, 1),
 	}
 }
 
-func (a *App) startup(ctx context.Context) {
+func (a *App) SetApplication(app *application.App) {
+	a.wailsApp = app
+}
 
+func (a *App) SetMainWindow(window *application.WebviewWindow) {
+	a.mainWindow = window
+}
+
+func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	wails_runtime.EventsOn(ctx, "menu_quit", func(optionalData ...interface{}) {
-		wails_runtime.Quit(ctx)
-	})
+	if a.wailsApp != nil {
+		a.wailsApp.Event.On("menu_quit", func(event *application.CustomEvent) {
+			a.wailsApp.Quit()
+		})
+	}
 
 	clipm.SetRefreshCallback(func() {
-		wails_runtime.EventsEmit(ctx, "ClipboardUpdated")
+		if a.wailsApp != nil {
+			a.wailsApp.Event.Emit("ClipboardUpdated")
+		}
 	})
 	go clipm.Record(ctx)
 
@@ -63,7 +77,6 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 
-	// Initialize file-based notes store
 	settings := config.LoadSettings()
 	a.notesStore = &notes.NotesStore{Dir: settings.NotesDir}
 	if err := a.notesStore.EnsureDir(); err != nil {
@@ -78,46 +91,45 @@ func (a *App) Greet(name string) string {
 }
 
 func (a *App) RegisterHotKey() {
-	registerHotkey(a)
+	go registerHotkey(a)
 }
 
 func (a *App) GetClipData(name string) string {
-
 	clipDb := config.GetInstance()
 
-	clipm := &clipm.ClipM{
+	clipStore := &clipm.ClipM{
 		DB: clipDb.DB,
 	}
 
-	clipList, err := clipm.ReadAll()
+	clipList, err := clipStore.ReadAll()
 	if err != nil {
 		fmt.Println("ReadAll", err)
 		return "[]"
 	}
-	clipm.SortByTimestamp(*clipList)
+	clipStore.SortByTimestamp(*clipList)
 	jsonClipList, err := json.Marshal(clipList)
 	if err != nil {
-		fmt.Println("Reverse", err)
+		fmt.Println("Marshal", err)
+		return "[]"
 	}
 	return string(jsonClipList)
 }
 
 func (a *App) ToggleClipSecret(hash string) error {
 	clipDb := config.GetInstance()
-	clipm := &clipm.ClipM{
+	clipStore := &clipm.ClipM{
 		DB: clipDb.DB,
 	}
-	return clipm.MarkSecret(hash)
+	return clipStore.MarkSecret(hash)
 }
 
 func (a *App) ClearClipboard() error {
 	clipDb := config.GetInstance()
-	clipm := &clipm.ClipM{
+	clipStore := &clipm.ClipM{
 		DB: clipDb.DB,
 	}
-	err := clipm.DeleteBucket()
+	err := clipStore.DeleteBucket()
 	if err == nil {
-		// Clear the OS clipboard as well in a goroutine to prevent blocking
 		go func() {
 			clipboard.Write(clipboard.FmtText, []byte(" "))
 		}()
@@ -154,29 +166,19 @@ func (a *App) LaunchApp(appID string) error {
 	return nil
 }
 
-// interactiveCommands is the set of CLI programs that require a real TTY.
-// Running them in a non-TTY exec will hang or produce garbage output.
 var interactiveCommands = map[string]bool{
-	// TUI monitors
 	"top": true, "htop": true, "btop": true, "atop": true, "glances": true,
-	// Text editors
 	"vim": true, "vi": true, "nvim": true, "nano": true, "emacs": true,
 	"pico": true, "micro": true, "helix": true, "hx": true,
-	// Pagers
 	"less": true, "more": true, "most": true,
-	// Interactive finders / file managers
 	"fzf": true, "ranger": true, "nnn": true, "broot": true, "lf": true, "yazi": true,
-	// Shells
 	"bash": true, "sh": true, "zsh": true, "fish": true, "ksh": true,
 	"tcsh": true, "csh": true, "dash": true,
-	// REPLs
 	"python": true, "python3": true, "python2": true,
 	"node": true, "deno": true,
 	"irb": true, "iex": true, "ghci": true, "sqlite3": true,
 	"psql": true, "mysql": true, "mongo": true,
-	// Network / remote
 	"ssh": true, "telnet": true, "nc": true, "netcat": true,
-	// Misc TUI
 	"man": true, "watch": true, "crontab": true,
 }
 
@@ -192,22 +194,19 @@ func (a *App) ExecuteCommand(command string) string {
 		return "Error: invalid command"
 	}
 
-	// Resolve bare binary name (handles full paths like /usr/bin/vim)
 	bin := filepath.Base(parts[0])
 
-	// Block interactive / TTY-dependent commands
 	if interactiveCommands[bin] {
 		return fmt.Sprintf(
 			"[blocked] '%s' is an interactive command that requires a TTY.\n"+
 				"Use a non-interactive equivalent instead, e.g.:\n"+
-				"  top  →  ps aux\n"+
-				"  man  →  man -P cat <topic>\n"+
-				"  python  →  python -c '...'",
+				"  top  ->  ps aux\n"+
+				"  man  ->  man -P cat <topic>\n"+
+				"  python  ->  python -c '...'",
 			bin,
 		)
 	}
 
-	// Block tail -f / --follow (runs indefinitely)
 	if bin == "tail" {
 		for _, arg := range parts[1:] {
 			if arg == "-f" || arg == "--follow" || (len(arg) > 1 && arg[0] == '-' && arg[1] != '-' && strings.ContainsRune(arg, 'f')) {
@@ -216,7 +215,6 @@ func (a *App) ExecuteCommand(command string) string {
 		}
 	}
 
-	// Run with a 15-second timeout to prevent accidental hangs
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -241,8 +239,6 @@ func (a *App) GetLastCommand() string {
 func (a *App) GetLastOutput() string {
 	return a.lastOutput
 }
-
-// ── Notes ─────────────────────────────────────────────────────────────────────
 
 func (a *App) SaveNote(content string) string {
 	note, err := a.notesStore.Save(content)
@@ -276,30 +272,35 @@ func (a *App) UpdateNote(id, content string) string {
 }
 
 func (a *App) GetNotesDir() string {
+	if a.notesStore == nil {
+		return ""
+	}
 	return a.notesStore.Dir
 }
 
-// ChooseNotesDir opens a native folder picker, saves the choice, and returns the new path.
 func (a *App) ChooseNotesDir() string {
-	newDir, err := wails_runtime.OpenDirectoryDialog(a.ctx, wails_runtime.OpenDialogOptions{
-		Title:                "Select Notes Folder",
-		DefaultDirectory:     a.notesStore.Dir,
-		CanCreateDirectories: true,
-	})
-	if err != nil || newDir == "" {
-		return a.notesStore.Dir // cancelled or error
+	if a.notesStore == nil || a.wailsApp == nil {
+		return ""
 	}
-	settings := config.LoadSettings()
-	settings.NotesDir = newDir
-	config.SaveSettings(settings)
-	a.notesStore.Dir = newDir
-	return newDir
+
+	// newDir, err := a.wailsApp.Dialog.SelectDirectory(application.OpenFileDialogOptions{
+	// 	Title:            "Select Notes Folder",
+	// 	DefaultDirectory: a.notesStore.Dir,
+	// 	CanCreateDirs:    true,
+	// })
+	// if err != nil || newDir == "" {
+	// 	return a.notesStore.Dir
+	// }
+
+	// settings := config.LoadSettings()
+	// settings.NotesDir = newDir
+	// config.SaveSettings(settings)
+	// a.notesStore.Dir = newDir
+	// return newDir
+	return ""
 }
 
-// ── App Icons ─────────────────────────────────────────────────────────────────
-
 func (a *App) GetAppIcon(appPath string) string {
-	// Fast path: check cache under read lock
 	a.iconMu.RLock()
 	cached, ok := a.iconCache[appPath]
 	a.iconMu.RUnlock()
@@ -307,7 +308,6 @@ func (a *App) GetAppIcon(appPath string) string {
 		return cached
 	}
 
-	// Slow path: extract icon, then store under write lock
 	icon := extractMacOSIconBase64(appPath)
 
 	a.iconMu.Lock()
@@ -350,7 +350,6 @@ func extractMacOSIconBase64(appPath string) string {
 		}
 	}
 
-	// Use cached temp PNG if already converted
 	hash := md5.Sum([]byte(appPath))
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("rilaunch_%x.png", hash))
 	if _, err := os.Stat(tmpFile); err != nil {
@@ -393,7 +392,7 @@ func registerHotkey(a *App) {
 			case a.refreshCh <- true:
 			default:
 			}
-		case <-time.After(time.Second * 30):
+		case <-time.After(30 * time.Second):
 			continue
 		}
 	}
@@ -401,12 +400,26 @@ func registerHotkey(a *App) {
 
 func (a *App) showWindow() {
 	a.isVisible = true
-	wails_runtime.EventsEmit(a.ctx, "Backend:GlobalHotkeyEvent", time.Now().String())
+
+	if a.mainWindow != nil {
+		a.mainWindow.Show()
+	}
+
+	if a.wailsApp != nil {
+		a.wailsApp.Event.Emit("Backend:GlobalHotkeyEvent", time.Now().String())
+	}
 }
 
 func (a *App) hideWindow() {
 	a.isVisible = false
-	wails_runtime.EventsEmit(a.ctx, "Backend:GlobalHotkeyEvent", time.Now().String())
+
+	if a.mainWindow != nil {
+		a.mainWindow.Hide()
+	}
+
+	if a.wailsApp != nil {
+		a.wailsApp.Event.Emit("Backend:GlobalHotkeyEvent", time.Now().String())
+	}
 }
 
 func (a *App) onExit() {}

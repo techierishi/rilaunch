@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@wailsio/runtime": "^3.0.0-alpha.79",
     "fuse.js": "^7.4.2",
     "marked": "^18.0.5",
     "solid-js": "^1.8.7"

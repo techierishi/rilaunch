@@ -1,5 +1,4 @@
 import { For, createResource, Show } from 'solid-js';
-import { GetAppIcon } from '../../wailsjs/go/main/App';
 import './CommandList.css';
 
 // Deterministic color from string

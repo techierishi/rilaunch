@@ -1,5 +1,4 @@
 import { createSignal, createMemo, For, Show } from "solid-js";
-import { UpdateNote } from "../../wailsjs/go/main/App";
 import "./NotesView.css";
 import { marked } from "marked";
 

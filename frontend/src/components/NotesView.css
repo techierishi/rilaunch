@@ -293,3 +293,19 @@
 }
 .notes-save-btn:hover    { background: rgba(0,0,0,0.9); }
 .notes-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.EasyMDEContainer {
+  height: 100%;
+}
+
+.EasyMDEContainer .CodeMirror {
+  border: none;
+  background: transparent;
+  font: inherit;
+  min-height: 360px;
+}
+
+.EasyMDEContainer .editor-toolbar,
+.EasyMDEContainer .editor-statusbar {
+  display: none !important;
+}

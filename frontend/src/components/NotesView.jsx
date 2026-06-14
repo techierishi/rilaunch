@@ -1,9 +1,16 @@
-import { createSignal, createMemo, For, Show } from "solid-js";
+import {
+  createSignal,
+  createMemo,
+  For,
+  Show,
+  onCleanup,
+  createEffect
+} from "solid-js";
 import "./NotesView.css";
 import { marked } from "marked";
+import EasyMDE from "easymde";
+import "easymde/dist/easymde.min.css";
 
-// ── Markdown setup ─────────────────────────────────────────────────────────────
-// Code blocks render as plain pre/code (no syntax highlighting) to stay light.
 marked.use({
   renderer: {
     code({ text = "" } = {}) {
@@ -44,19 +51,16 @@ function fmtDate(iso) {
   }
 }
 
-// ── NotesView ──────────────────────────────────────────────────────────────────
 function NotesView(props) {
-  // view: 'list' | 'preview' | 'edit'
   const [view, setView] = createSignal("edit");
   const [activeNote, setActiveNote] = createSignal(null);
   const [editContent, setEditContent] = createSignal("");
+
   let textareaRef;
+  let editor;
 
-  const visibleNotes = createMemo(() => {
-    return props.notes;
-  });
+  const visibleNotes = createMemo(() => props.notes);
 
-  // ── navigation helpers ──────────────────────────────────────────────────────
   const openPreview = (note) => {
     setActiveNote(note);
     setView("preview");
@@ -66,7 +70,6 @@ function NotesView(props) {
     setActiveNote(note || null);
     setEditContent(note?.content || "");
     setView("edit");
-    setTimeout(() => textareaRef?.focus(), 30);
   };
 
   const goBack = () => {
@@ -81,18 +84,20 @@ function NotesView(props) {
     }
   };
 
-  // ── actions ─────────────────────────────────────────────────────────────────
   const handleSave = async () => {
-    const content = editContent().trim();
+    const content = (editor ? editor.value() : editContent()).trim();
     if (!content) return;
+
     if (activeNote()) {
       await UpdateNote(activeNote().id, content);
     } else {
       await props.onSave(content);
     }
+
     await props.onReload();
     setView("list");
     setActiveNote(null);
+    setEditContent("");
   };
 
   const handleDelete = async (id) => {
@@ -102,18 +107,63 @@ function NotesView(props) {
     setActiveNote(null);
   };
 
-  const handleTextareaKey = (e) => {
+  const handleEditorKey = (_, e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
       handleSave();
     }
-    if (e.key === "Escape") goBack();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      goBack();
+    }
   };
 
-  // ── render ──────────────────────────────────────────────────────────────────
+  createEffect(() => {
+    if (view() !== "edit" || !textareaRef) return;
+
+    queueMicrotask(() => {
+      if (editor) {
+        editor.toTextArea();
+        editor = null;
+      }
+
+      editor = new EasyMDE({
+        element: textareaRef,
+        initialValue: editContent(),
+        spellChecker: false,
+        autofocus: true,
+        status: false,
+        toolbar: false,
+        autoDownloadFontAwesome: false,
+        placeholder: "Write in markdown…",
+        renderingConfig: {
+          singleLineBreaks: true
+        }
+      });
+
+      editor.codemirror.on("change", () => {
+        setEditContent(editor.value());
+      });
+
+      editor.codemirror.on("keydown", handleEditorKey);
+
+      queueMicrotask(() => {
+        editor?.codemirror.setSize("100%", "100%");
+        editor?.codemirror.refresh();
+        editor?.codemirror?.focus();
+      });
+    });
+  });
+
+  onCleanup(() => {
+    if (editor) {
+      editor.toTextArea();
+      editor = null;
+    }
+  });
+
   return (
     <div class="notes-view">
-      {/* ── LIST ─────────────────────────────────────────────────────────── */}
       <Show when={view() === "list"}>
         <div class="notes-list">
           <Show when={visibleNotes().length === 0}>
@@ -136,6 +186,7 @@ function NotesView(props) {
               <div class="notes-empty-sub">Click + to create one</div>
             </div>
           </Show>
+
           <For each={visibleNotes()}>
             {(note) => {
               const preview =
@@ -145,6 +196,7 @@ function NotesView(props) {
                 .replace(/[*_`]/g, "")
                 .slice(0, 72);
               const fileId = note.id.split("_").join(" ");
+
               return (
                 <div class="note-row" onClick={() => openPreview(note)}>
                   <div class="note-row-fileid">{` ${fileId}` || "(empty)"}</div>
@@ -200,7 +252,6 @@ function NotesView(props) {
         </button>
       </Show>
 
-      {/* ── PREVIEW ──────────────────────────────────────────────────────── */}
       <Show when={view() === "preview"}>
         <div class="notes-panel">
           <div class="notes-panel-bar">
@@ -219,11 +270,13 @@ function NotesView(props) {
               </svg>
               Back
             </button>
+
             <div class="note-panel-meta">
               <span class="note-row-date">
                 {fmtDate(activeNote()?.updatedAt || activeNote()?.createdAt)}
               </span>
             </div>
+
             <div class="note-panel-actions">
               <button
                 class="note-action-btn"
@@ -243,6 +296,7 @@ function NotesView(props) {
                 </svg>
                 Edit
               </button>
+
               <button
                 class="note-action-btn danger"
                 onClick={() => handleDelete(activeNote().id)}
@@ -264,6 +318,7 @@ function NotesView(props) {
               </button>
             </div>
           </div>
+
           <div class="notes-preview-body">
             <div
               class="md-body"
@@ -273,7 +328,6 @@ function NotesView(props) {
         </div>
       </Show>
 
-      {/* ── EDIT ─────────────────────────────────────────────────────────── */}
       <Show when={view() === "edit"}>
         <div class="notes-panel">
           <div class="notes-panel-bar">
@@ -292,6 +346,7 @@ function NotesView(props) {
               </svg>
               List
             </button>
+
             <div class="note-panel-actions" style="margin-left:auto">
               <button
                 class="notes-save-btn"
@@ -303,14 +358,7 @@ function NotesView(props) {
             </div>
           </div>
 
-          <textarea
-            ref={textareaRef}
-            class="notes-textarea"
-            placeholder="Write in markdown…"
-            value={editContent()}
-            onInput={(e) => setEditContent(e.target.value)}
-            onKeyDown={handleTextareaKey}
-          />
+          <textarea ref={textareaRef} />
         </div>
       </Show>
     </div>

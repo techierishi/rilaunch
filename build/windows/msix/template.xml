@@ -25,7 +25,7 @@
         </Capabilities>
         <Applications>
             <Application
-                Id="com.example.rilaunch"
+                Id="com.pal.rilaunch"
                 Description="A rilaunch application"
                 DisplayName="My Product"
                 ExecutableName="rilaunch"

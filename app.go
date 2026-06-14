@@ -9,13 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"rilaunch/pkg/appm"
 	"rilaunch/pkg/clipm"
 	"rilaunch/pkg/config"
 	"rilaunch/pkg/notes"
 	goruntime "runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -30,21 +28,16 @@ type App struct {
 	refreshCh    chan bool
 	clipData     []clipm.ClipInfo
 	filteredData []clipm.ClipInfo
-	appManager   *appm.Manager
 	lastCommand  string
 	lastOutput   string
 	notesStore   *notes.NotesStore
-	iconCache    map[string]string
-	iconMu       sync.RWMutex
 	visible      bool
 	ready        bool
 }
 
 func NewApp() *App {
 	return &App{
-		appManager: appm.NewManager(),
-		iconCache:  make(map[string]string),
-		refreshCh:  make(chan bool, 1),
+		refreshCh: make(chan bool, 1),
 	}
 }
 
@@ -71,12 +64,6 @@ func (a *App) startup(ctx context.Context) {
 		}
 	})
 	go clipm.Record(ctx)
-
-	go func() {
-		if err := a.appManager.Initialize(); err != nil {
-			fmt.Printf("Failed to initialize application manager: %v\n", err)
-		}
-	}()
 
 	settings := config.LoadSettings()
 	a.notesStore = &notes.NotesStore{Dir: settings.NotesDir}
@@ -138,109 +125,6 @@ func (a *App) ClearClipboard() error {
 	return err
 }
 
-func (a *App) GetAllApps() string {
-	apps, err := a.appManager.GetAllApps()
-	if err != nil {
-		fmt.Printf("GetAllApps error: %v\n", err)
-		return "[]"
-	}
-	return apps
-}
-
-func (a *App) SearchApps(query string) string {
-	apps, err := a.appManager.SearchApps(query)
-	if err != nil {
-		fmt.Printf("SearchApps error: %v\n", err)
-		return "[]"
-	}
-	return apps
-}
-
-func (a *App) LaunchApp(appID string) error {
-	err := a.appManager.LaunchApp(appID)
-	if err != nil {
-		fmt.Printf("LaunchApp error: %v\n", err)
-		return err
-	}
-
-	a.Hide()
-	return nil
-}
-
-var interactiveCommands = map[string]bool{
-	"top": true, "htop": true, "btop": true, "atop": true, "glances": true,
-	"vim": true, "vi": true, "nvim": true, "nano": true, "emacs": true,
-	"pico": true, "micro": true, "helix": true, "hx": true,
-	"less": true, "more": true, "most": true,
-	"fzf": true, "ranger": true, "nnn": true, "broot": true, "lf": true, "yazi": true,
-	"bash": true, "sh": true, "zsh": true, "fish": true, "ksh": true,
-	"tcsh": true, "csh": true, "dash": true,
-	"python": true, "python3": true, "python2": true,
-	"node": true, "deno": true,
-	"irb": true, "iex": true, "ghci": true, "sqlite3": true,
-	"psql": true, "mysql": true, "mongo": true,
-	"ssh": true, "telnet": true, "nc": true, "netcat": true,
-	"man": true, "watch": true, "crontab": true,
-}
-
-func (a *App) ExecuteCommand(command string) string {
-	if strings.TrimSpace(command) == "" {
-		return "Error: empty command"
-	}
-
-	a.lastCommand = command
-
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return "Error: invalid command"
-	}
-
-	bin := filepath.Base(parts[0])
-
-	if interactiveCommands[bin] {
-		return fmt.Sprintf(
-			"[blocked] '%s' is an interactive command that requires a TTY.\n"+
-				"Use a non-interactive equivalent instead, e.g.:\n"+
-				"  top  ->  ps aux\n"+
-				"  man  ->  man -P cat <topic>\n"+
-				"  python  ->  python -c '...'",
-			bin,
-		)
-	}
-
-	if bin == "tail" {
-		for _, arg := range parts[1:] {
-			if arg == "-f" || arg == "--follow" || (len(arg) > 1 && arg[0] == '-' && arg[1] != '-' && strings.ContainsRune(arg, 'f')) {
-				return "[blocked] 'tail -f' follows a file indefinitely and cannot run here.\nUse 'tail -n 50 <file>' for a snapshot instead."
-			}
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	output, err := cmd.CombinedOutput()
-
-	result := string(output)
-	if ctx.Err() == context.DeadlineExceeded {
-		result = fmt.Sprintf("[timeout] command exceeded 15 s and was killed.\n%s", result)
-	} else if err != nil {
-		result = fmt.Sprintf("Error: %v\n%s", err, result)
-	}
-
-	a.lastOutput = result
-	return result
-}
-
-func (a *App) GetLastCommand() string {
-	return a.lastCommand
-}
-
-func (a *App) GetLastOutput() string {
-	return a.lastOutput
-}
-
 func (a *App) SaveNote(content string) string {
 	note, err := a.notesStore.Save(content)
 	if err != nil {
@@ -284,38 +168,13 @@ func (a *App) ChooseNotesDir() string {
 		return ""
 	}
 
-	// newDir, err := a.wailsApp.Dialog.SelectDirectory(application.OpenFileDialogOptions{
-	// 	Title:            "Select Notes Folder",
-	// 	DefaultDirectory: a.notesStore.Dir,
-	// 	CanCreateDirs:    true,
-	// })
-	// if err != nil || newDir == "" {
-	// 	return a.notesStore.Dir
-	// }
+	a.wailsApp.Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{})
 
 	// settings := config.LoadSettings()
-	// settings.NotesDir = newDir
+	// settings.NotesDir = newDir.
 	// config.SaveSettings(settings)
 	// a.notesStore.Dir = newDir
-	// return newDir
 	return ""
-}
-
-func (a *App) GetAppIcon(appPath string) string {
-	a.iconMu.RLock()
-	cached, ok := a.iconCache[appPath]
-	a.iconMu.RUnlock()
-	if ok {
-		return cached
-	}
-
-	icon := extractMacOSIconBase64(appPath)
-
-	a.iconMu.Lock()
-	a.iconCache[appPath] = icon
-	a.iconMu.Unlock()
-
-	return icon
 }
 
 func extractMacOSIconBase64(appPath string) string {

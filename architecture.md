@@ -32,15 +32,12 @@ rilaunch is a **keyboard-first, plugin-based launcher** for macOS. The core idea
                │  Wails JS bridge (wailsjs/)
 ┌──────────────▼──────────────────────────────┐
 │ Go backend (app.go)                         │
-│  Exposes methods: GetAllApps, LaunchApp,    │
-│  GetClipData, ExecuteCommand,               │
-│  GetNotes / SaveNote / DeleteNote,          │
-│  GetAppIcon                                 │
+│  GetClipData,                               │
+│  GetNotes / SaveNote / DeleteNote           │
 └──────────────┬──────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────┐
 │ pkg/ — domain packages                      │
-│  appm/   — app discovery & launching        │
 │  clipm/  — clipboard daemon + bbolt storage │
 │  notes/  — note CRUD via bbolt              │
 │  config/ — shared bbolt DB singleton        │
@@ -63,14 +60,12 @@ A plugin consists of:
 
 | Tab | Key | Description |
 |-----|-----|-------------|
-| Apps | ⌘1 | Fuzzy-search all installed macOS apps. Single click or Enter to launch. |
-| Clipboard | ⌘2 | Shows clipboard history captured by the background daemon. Click to copy & hide. |
-| Shell | ⌘3 | Inline shell executor with command history (localStorage, 50 items). ↑↓ to navigate history. |
-| Notes | ⌘4 | Save text snippets tagged as Note / TODO / Snippet / Idea. Stored in bbolt. |
+| Clipboard | ⌘1 | Shows clipboard history captured by the background daemon. Click to copy & hide. |
+| Notes | ⌘2 | Save text snippets tagged as Note / TODO / Snippet / Idea. Stored in bbolt. |
 
 ---
 
-## Data flow: Apps tab
+## Data flow: Clipboard tab
 
 ```
 onMount

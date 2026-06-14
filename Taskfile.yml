@@ -2,124 +2,60 @@ version: '3'
 
 vars:
   APP_NAME: "rilaunch"
+  BIN_DIR: "bin"
+  PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+  linux: ./build/linux/Taskfile.yml
+  ios: ./build/ios/Taskfile.yml
+  android: ./build/android/Taskfile.yml
 
 tasks:
-
-  pre-build:
-    summary: Pre-build hooks
-
-  post-build:
-    summary: Post-build hooks
-
-  install-frontend-deps:
-    summary: Install frontend dependencies
-    dir: frontend
-    sources:
-      - package.json
-      - package-lock.json
-    generates:
-      - node_modules/*
-    preconditions:
-      - sh: npm version
-        msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
-    cmds:
-      - npm install
-
-  build-frontend:
-    summary: Build the frontend project
-    dir: frontend
-    deps:
-      - install-frontend-deps
-    cmds:
-      - npm run build
-
-  darwin:build:
-    summary: Builds the application for macOS
-    platforms:
-      - darwin
-    cmds:
-      - task: pre-build
-      - task: build-frontend
-      - go build -gcflags=all="-N -l" -o bin/rilaunch
-      - task: post-build
-    env:
-      CGO_CFLAGS: "-mmacosx-version-min=10.13"
-      CGO_LDFLAGS: "-mmacosx-version-min=10.13"
-      MACOSX_DEPLOYMENT_TARGET: "10.13"
-
-  windows:build:
-    summary: Builds the application for Windows
-    platforms:
-      - windows
-    cmds:
-      - task: pre-build
-      - task: build-frontend
-      - go build -gcflags=all="-N -l" -o bin/rilaunch.exe
-      - task: post-build
-
   build:
-    summary: Builds all supported platforms
+    summary: Builds the application
     cmds:
-      - task: darwin:build
-      - task: windows:build
+      - task: "{{OS}}:build"
 
-  generate-icons:
-    summary: Generates Windows .ico and macOS .icns files from appicon.png
-    dir: build
+  package:
+    summary: Packages a production build of the application
     cmds:
-      - wails generate icons -input appicon.png
+      - task: "{{OS}}:package"
 
-  build-app-prod-darwin:
-    summary: Creates a production binary for macOS
-    vars:
-      ARCH: $GOARCH
-    env:
-      CGO_CFLAGS: "-mmacosx-version-min=10.13"
-      CGO_LDFLAGS: "-mmacosx-version-min=10.13"
-      MACOSX_DEPLOYMENT_TARGET: "10.13"
+  run:
+    summary: Runs the application
     cmds:
-      - task: pre-build
-      - task: build-frontend
-      - GOOS=darwin GOARCH={{.ARCH}} go build -tags production -ldflags="-w -s" -o build/bin/{{.APP_NAME}}
-      - task: post-build
+      - task: "{{OS}}:run"
 
-  create-app-bundle:
-    summary: Builds a macOS .app bundle
+  dev:
+    summary: Runs the application in development mode
     cmds:
-      - mkdir -p {{.APP_NAME}}.app/Contents/MacOS
-      - mkdir -p {{.APP_NAME}}.app/Contents/Resources
-      - cp build/icons.icns {{.APP_NAME}}.app/Contents/Resources
-      - cp build/bin/{{.APP_NAME}} {{.APP_NAME}}.app/Contents/MacOS
-      - cp build/Info.plist {{.APP_NAME}}.app/Contents
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
 
-  package-darwin-arm64:
-    summary: Packages a production build into a macOS .app bundle
-    platform: darwin
-    deps:
-      - task: build-app-prod-darwin
-        vars:
-          ARCH: arm64
-      - generate-icons
+  setup:docker:
+    summary: Builds Docker image for cross-compilation (~800MB download)
     cmds:
-      - task: create-app-bundle
+      - task: common:setup:docker
 
-  generate:syso:
-    summary: Generates Windows resource file
-    dir: build
-    platform: windows
-    vars:
-      ARCH: $GOARCH
+  build:server:
+    summary: Builds the application in server mode (no GUI, HTTP server only)
     cmds:
-      - wails generate syso -arch {{.ARCH}} -icon icon.ico -manifest wails.exe.manifest -info info.json -out ../wails.syso
+      - task: common:build:server
 
-  windows:package:
-    summary: Packages a production Windows executable
-    platform: windows
-    deps:
-      - generate-icons
+  run:server:
+    summary: Runs the application in server mode
     cmds:
-      - task: generate:syso
-        vars:
-          ARCH: amd64
-      - go build -tags production -ldflags="-w -s -H windowsgui" -o bin/{{.APP_NAME}}.exe
-      - powershell Remove-Item wails.syso
+      - task: common:run:server
+
+  build:docker:
+    summary: Builds a Docker image for server mode deployment
+    cmds:
+      - task: common:build:docker
+
+  run:docker:
+    summary: Builds and runs the Docker image
+    cmds:
+      - task: common:run:docker

@@ -38,6 +38,7 @@ true&&(function polyfill() {
 
 const IS_DEV = false;
 const equalFn = (a, b) => a === b;
+const $TRACK = Symbol("solid-track");
 const signalOptions = {
   equals: equalFn
 };
@@ -53,12 +54,12 @@ const UNOWNED = {
 var Owner = null;
 let Transition = null;
 let ExternalSourceConfig = null;
-let Listener = null;
+let Listener$1 = null;
 let Updates = null;
 let Effects = null;
 let ExecCount = 0;
 function createRoot(fn, detachedOwner) {
-  const listener = Listener,
+  const listener = Listener$1,
     owner = Owner,
     unowned = fn.length === 0,
     current = detachedOwner === undefined ? owner : detachedOwner,
@@ -70,11 +71,11 @@ function createRoot(fn, detachedOwner) {
     },
     updateFn = unowned ? fn : () => fn(() => untrack(() => cleanNode(root)));
   Owner = root;
-  Listener = null;
+  Listener$1 = null;
   try {
     return runUpdates(updateFn, true);
   } finally {
-    Listener = listener;
+    Listener$1 = listener;
     Owner = owner;
   }
 }
@@ -98,6 +99,12 @@ function createRenderEffect(fn, value, options) {
   const c = createComputation(fn, value, false, STALE);
   updateComputation(c);
 }
+function createEffect(fn, value, options) {
+  runEffects = runUserEffects;
+  const c = createComputation(fn, value, false, STALE);
+  c.user = true;
+  Effects ? Effects.push(c) : updateComputation(c);
+}
 function createMemo(fn, value, options) {
   options = options ? Object.assign({}, signalOptions, options) : signalOptions;
   const c = createComputation(fn, value, true, 0);
@@ -108,15 +115,22 @@ function createMemo(fn, value, options) {
   return readSignal.bind(c);
 }
 function untrack(fn) {
-  if (Listener === null) return fn();
-  const listener = Listener;
-  Listener = null;
+  if (Listener$1 === null) return fn();
+  const listener = Listener$1;
+  Listener$1 = null;
   try {
     if (ExternalSourceConfig) ;
     return fn();
   } finally {
-    Listener = listener;
+    Listener$1 = listener;
   }
+}
+function onMount(fn) {
+  createEffect(() => untrack(fn));
+}
+function onCleanup(fn) {
+  if (Owner === null) ;else if (Owner.cleanups === null) Owner.cleanups = [fn];else Owner.cleanups.push(fn);
+  return fn;
 }
 function readSignal() {
   if (this.sources && (this.state)) {
@@ -127,21 +141,21 @@ function readSignal() {
       Updates = updates;
     }
   }
-  if (Listener) {
+  if (Listener$1) {
     const sSlot = this.observers ? this.observers.length : 0;
-    if (!Listener.sources) {
-      Listener.sources = [this];
-      Listener.sourceSlots = [sSlot];
+    if (!Listener$1.sources) {
+      Listener$1.sources = [this];
+      Listener$1.sourceSlots = [sSlot];
     } else {
-      Listener.sources.push(this);
-      Listener.sourceSlots.push(sSlot);
+      Listener$1.sources.push(this);
+      Listener$1.sourceSlots.push(sSlot);
     }
     if (!this.observers) {
-      this.observers = [Listener];
-      this.observerSlots = [Listener.sources.length - 1];
+      this.observers = [Listener$1];
+      this.observerSlots = [Listener$1.sources.length - 1];
     } else {
-      this.observers.push(Listener);
-      this.observerSlots.push(Listener.sources.length - 1);
+      this.observers.push(Listener$1);
+      this.observerSlots.push(Listener$1.sources.length - 1);
     }
   }
   return this.value;
@@ -181,8 +195,8 @@ function updateComputation(node) {
 function runComputation(node, value, time) {
   let nextValue;
   const owner = Owner,
-    listener = Listener;
-  Listener = Owner = node;
+    listener = Listener$1;
+  Listener$1 = Owner = node;
   try {
     nextValue = node.fn(value);
   } catch (err) {
@@ -196,7 +210,7 @@ function runComputation(node, value, time) {
     node.updatedAt = time + 1;
     return handleError(err);
   } finally {
-    Listener = listener;
+    Listener$1 = listener;
     Owner = owner;
   }
   if (!node.updatedAt || node.updatedAt <= time) {
@@ -276,6 +290,15 @@ function completeUpdates(wait) {
 function runQueue(queue) {
   for (let i = 0; i < queue.length; i++) runTop(queue[i]);
 }
+function runUserEffects(queue) {
+  let i,
+    userLength = 0;
+  for (i = 0; i < queue.length; i++) {
+    const e = queue[i];
+    if (!e.user) runTop(e);else queue[userLength++] = e;
+  }
+  for (i = 0; i < userLength; i++) runTop(queue[i]);
+}
 function lookUpstream(node, ignore) {
   node.state = 0;
   for (let i = 0; i < node.sources.length; i += 1) {
@@ -340,9 +363,138 @@ function handleError(err, owner = Owner) {
   const error = castError(err);
   throw error;
 }
+
+const FALLBACK = Symbol("fallback");
+function dispose(d) {
+  for (let i = 0; i < d.length; i++) d[i]();
+}
+function mapArray(list, mapFn, options = {}) {
+  let items = [],
+    mapped = [],
+    disposers = [],
+    len = 0,
+    indexes = mapFn.length > 1 ? [] : null;
+  onCleanup(() => dispose(disposers));
+  return () => {
+    let newItems = list() || [],
+      newLen = newItems.length,
+      i,
+      j;
+    newItems[$TRACK];
+    return untrack(() => {
+      let newIndices, newIndicesNext, temp, tempdisposers, tempIndexes, start, end, newEnd, item;
+      if (newLen === 0) {
+        if (len !== 0) {
+          dispose(disposers);
+          disposers = [];
+          items = [];
+          mapped = [];
+          len = 0;
+          indexes && (indexes = []);
+        }
+        if (options.fallback) {
+          items = [FALLBACK];
+          mapped[0] = createRoot(disposer => {
+            disposers[0] = disposer;
+            return options.fallback();
+          });
+          len = 1;
+        }
+      }
+      else if (len === 0) {
+        mapped = new Array(newLen);
+        for (j = 0; j < newLen; j++) {
+          items[j] = newItems[j];
+          mapped[j] = createRoot(mapper);
+        }
+        len = newLen;
+      } else {
+        temp = new Array(newLen);
+        tempdisposers = new Array(newLen);
+        indexes && (tempIndexes = new Array(newLen));
+        for (start = 0, end = Math.min(len, newLen); start < end && items[start] === newItems[start]; start++);
+        for (end = len - 1, newEnd = newLen - 1; end >= start && newEnd >= start && items[end] === newItems[newEnd]; end--, newEnd--) {
+          temp[newEnd] = mapped[end];
+          tempdisposers[newEnd] = disposers[end];
+          indexes && (tempIndexes[newEnd] = indexes[end]);
+        }
+        newIndices = new Map();
+        newIndicesNext = new Array(newEnd + 1);
+        for (j = newEnd; j >= start; j--) {
+          item = newItems[j];
+          i = newIndices.get(item);
+          newIndicesNext[j] = i === undefined ? -1 : i;
+          newIndices.set(item, j);
+        }
+        for (i = start; i <= end; i++) {
+          item = items[i];
+          j = newIndices.get(item);
+          if (j !== undefined && j !== -1) {
+            temp[j] = mapped[i];
+            tempdisposers[j] = disposers[i];
+            indexes && (tempIndexes[j] = indexes[i]);
+            j = newIndicesNext[j];
+            newIndices.set(item, j);
+          } else disposers[i]();
+        }
+        for (j = start; j < newLen; j++) {
+          if (j in temp) {
+            mapped[j] = temp[j];
+            disposers[j] = tempdisposers[j];
+            if (indexes) {
+              indexes[j] = tempIndexes[j];
+              indexes[j](j);
+            }
+          } else mapped[j] = createRoot(mapper);
+        }
+        mapped = mapped.slice(0, len = newLen);
+        items = newItems.slice(0);
+      }
+      return mapped;
+    });
+    function mapper(disposer) {
+      disposers[j] = disposer;
+      if (indexes) {
+        const [s, set] = createSignal(j);
+        indexes[j] = set;
+        return mapFn(newItems[j], s);
+      }
+      return mapFn(newItems[j]);
+    }
+  };
+}
 function createComponent(Comp, props) {
   return untrack(() => Comp(props || {}));
 }
+
+const narrowedError = name => `Stale read from <${name}>.`;
+function For(props) {
+  const fallback = "fallback" in props && {
+    fallback: () => props.fallback
+  };
+  return createMemo(mapArray(() => props.each, props.children, fallback || undefined));
+}
+function Show(props) {
+  const keyed = props.keyed;
+  const conditionValue = createMemo(() => props.when, undefined, undefined);
+  const condition = keyed ? conditionValue : createMemo(conditionValue, undefined, {
+    equals: (a, b) => !a === !b
+  });
+  return createMemo(() => {
+    const c = condition();
+    if (c) {
+      const child = props.children;
+      const fn = typeof child === "function" && child.length > 0;
+      return fn ? untrack(() => child(keyed ? c : () => {
+        if (!untrack(condition)) throw narrowedError("Show");
+        return conditionValue();
+      })) : child;
+    }
+    return props.fallback;
+  }, undefined, undefined);
+}
+
+const memo = fn => createMemo(() => fn());
 
 function reconcileArrays(parentNode, a, b) {
   let bLength = b.length,
@@ -413,6 +565,17 @@ function render(code, element, init, options = {}) {
     element.textContent = "";
   };
 }
+function template(html, isImportNode, isSVG, isMathML) {
+  let node;
+  const create = () => {
+    const t = document.createElement("template");
+    t.innerHTML = html;
+    return t.content.firstChild;
+  };
+  const fn = () => (node || (node = create())).cloneNode(true);
+  fn.cloneNode = fn;
+  return fn;
+}
 function delegateEvents(eventNames, document = window.document) {
   const e = document[$$EVENTS] || (document[$$EVENTS] = new Set());
   for (let i = 0, l = eventNames.length; i < l; i++) {
@@ -422,6 +585,23 @@ function delegateEvents(eventNames, document = window.document) {
       document.addEventListener(name, eventHandler);
     }
   }
+}
+function setAttribute(node, name, value) {
+  if (value == null) node.removeAttribute(name);else node.setAttribute(name, value);
+}
+function className(node, value) {
+  if (value == null) node.removeAttribute("class");else node.className = value;
+}
+function addEventListener(node, name, handler, delegate) {
+  {
+    if (Array.isArray(handler)) {
+      node[`$$${name}`] = handler[0];
+      node[`$$${name}Data`] = handler[1];
+    } else node[`$$${name}`] = handler;
+  }
+}
+function use(fn, element, arg) {
+  return untrack(() => fn(element, arg));
 }
 function insert(parent, accessor, marker, initial) {
   if (marker !== undefined && !initial) initial = [];
@@ -792,10 +972,10 @@ The electron alternative for Go
 */
 // setup
 window.addEventListener('contextmenu', contextMenuHandler);
-const call = newRuntimeCaller(objectNames.ContextMenu);
+const call$1 = newRuntimeCaller(objectNames.ContextMenu);
 const ContextMenuOpen = 0;
 function openContextMenu(id, x, y, data) {
-    void call(ContextMenuOpen, { id, x, y, data });
+    void call$1(ContextMenuOpen, { id, x, y, data });
 }
 function contextMenuHandler(event) {
     const target = eventTarget(event);
@@ -1134,6 +1314,1153 @@ function onMouseMove(event) {
     // Out of border area.
     else
         setResize();
+}
+
+// Source: https://github.com/inspect-js/is-callable
+// The MIT License (MIT)
+//
+// Copyright (c) 2015 Jordan Harband
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+var fnToStr = Function.prototype.toString;
+var reflectApply = typeof Reflect === 'object' && Reflect !== null && Reflect.apply;
+var badArrayLike;
+var isCallableMarker;
+if (typeof reflectApply === 'function' && typeof Object.defineProperty === 'function') {
+    try {
+        badArrayLike = Object.defineProperty({}, 'length', {
+            get: function () {
+                throw isCallableMarker;
+            }
+        });
+        isCallableMarker = {};
+        // eslint-disable-next-line no-throw-literal
+        reflectApply(function () { throw 42; }, null, badArrayLike);
+    }
+    catch (_) {
+        if (_ !== isCallableMarker) {
+            reflectApply = null;
+        }
+    }
+}
+else {
+    reflectApply = null;
+}
+var constructorRegex = /^\s*class\b/;
+var isES6ClassFn = function isES6ClassFunction(value) {
+    try {
+        var fnStr = fnToStr.call(value);
+        return constructorRegex.test(fnStr);
+    }
+    catch (e) {
+        return false; // not a function
+    }
+};
+var tryFunctionObject = function tryFunctionToStr(value) {
+    try {
+        if (isES6ClassFn(value)) {
+            return false;
+        }
+        fnToStr.call(value);
+        return true;
+    }
+    catch (e) {
+        return false;
+    }
+};
+var toStr = Object.prototype.toString;
+var objectClass = '[object Object]';
+var fnClass = '[object Function]';
+var genClass = '[object GeneratorFunction]';
+var ddaClass = '[object HTMLAllCollection]'; // IE 11
+var ddaClass2 = '[object HTML document.all class]';
+var ddaClass3 = '[object HTMLCollection]'; // IE 9-10
+var hasToStringTag = typeof Symbol === 'function' && !!Symbol.toStringTag; // better: use `has-tostringtag`
+var isIE68 = !(0 in [,]); // eslint-disable-line no-sparse-arrays, comma-spacing
+var isDDA = function isDocumentDotAll() { return false; };
+if (typeof document === 'object') {
+    // Firefox 3 canonicalizes DDA to undefined when it's not accessed directly
+    var all = document.all;
+    if (toStr.call(all) === toStr.call(document.all)) {
+        isDDA = function isDocumentDotAll(value) {
+            /* globals document: false */
+            // in IE 6-8, typeof document.all is "object" and it's truthy
+            if ((isIE68 || !value) && (typeof value === 'undefined' || typeof value === 'object')) {
+                try {
+                    var str = toStr.call(value);
+                    return (str === ddaClass
+                        || str === ddaClass2
+                        || str === ddaClass3 // opera 12.16
+                        || str === objectClass // IE 6-8
+                    ) && value('') == null; // eslint-disable-line eqeqeq
+                }
+                catch (e) { /**/ }
+            }
+            return false;
+        };
+    }
+}
+function isCallableRefApply(value) {
+    if (isDDA(value)) {
+        return true;
+    }
+    if (!value) {
+        return false;
+    }
+    if (typeof value !== 'function' && typeof value !== 'object') {
+        return false;
+    }
+    try {
+        reflectApply(value, null, badArrayLike);
+    }
+    catch (e) {
+        if (e !== isCallableMarker) {
+            return false;
+        }
+    }
+    return !isES6ClassFn(value) && tryFunctionObject(value);
+}
+function isCallableNoRefApply(value) {
+    if (isDDA(value)) {
+        return true;
+    }
+    if (!value) {
+        return false;
+    }
+    if (typeof value !== 'function' && typeof value !== 'object') {
+        return false;
+    }
+    if (hasToStringTag) {
+        return tryFunctionObject(value);
+    }
+    if (isES6ClassFn(value)) {
+        return false;
+    }
+    var strClass = toStr.call(value);
+    if (strClass !== fnClass && strClass !== genClass && !(/^\[object HTML/).test(strClass)) {
+        return false;
+    }
+    return tryFunctionObject(value);
+}
+const isCallable = reflectApply ? isCallableRefApply : isCallableNoRefApply;
+
+/*
+ _	   __	  _ __
+| |	 / /___ _(_) /____
+| | /| / / __ `/ / / ___/
+| |/ |/ / /_/ / / (__  )
+|__/|__/\__,_/_/_/____/
+The electron alternative for Go
+(c) Lea Anthony 2019-present
+*/
+var _a;
+/**
+ * Exception class that will be used as rejection reason
+ * in case a {@link CancellablePromise} is cancelled successfully.
+ *
+ * The value of the {@link name} property is the string `"CancelError"`.
+ * The value of the {@link cause} property is the cause passed to the cancel method, if any.
+ */
+class CancelError extends Error {
+    /**
+     * Constructs a new `CancelError` instance.
+     * @param message - The error message.
+     * @param options - Options to be forwarded to the Error constructor.
+     */
+    constructor(message, options) {
+        super(message, options);
+        this.name = "CancelError";
+    }
+}
+/**
+ * Exception class that will be reported as an unhandled rejection
+ * in case a {@link CancellablePromise} rejects after being cancelled,
+ * or when the `oncancelled` callback throws or rejects.
+ *
+ * The value of the {@link name} property is the string `"CancelledRejectionError"`.
+ * The value of the {@link cause} property is the reason the promise rejected with.
+ *
+ * Because the original promise was cancelled,
+ * a wrapper promise will be passed to the unhandled rejection listener instead.
+ * The {@link promise} property holds a reference to the original promise.
+ */
+class CancelledRejectionError extends Error {
+    /**
+     * Constructs a new `CancelledRejectionError` instance.
+     * @param promise - The promise that caused the error originally.
+     * @param reason - The rejection reason.
+     * @param info - An optional informative message specifying the circumstances in which the error was thrown.
+     *               Defaults to the string `"Unhandled rejection in cancelled promise."`.
+     */
+    constructor(promise, reason, info) {
+        super((info !== null && info !== void 0 ? info : "Unhandled rejection in cancelled promise.") + " Reason: " + errorMessage(reason), { cause: reason });
+        this.promise = promise;
+        this.name = "CancelledRejectionError";
+    }
+}
+// Private field names.
+const barrierSym = Symbol("barrier");
+const cancelImplSym = Symbol("cancelImpl");
+const species = (_a = Symbol.species) !== null && _a !== void 0 ? _a : Symbol("speciesPolyfill");
+/**
+ * A promise with an attached method for cancelling long-running operations (see {@link CancellablePromise#cancel}).
+ * Cancellation can optionally be bound to an {@link AbortSignal}
+ * for better composability (see {@link CancellablePromise#cancelOn}).
+ *
+ * Cancelling a pending promise will result in an immediate rejection
+ * with an instance of {@link CancelError} as reason,
+ * but whoever started the promise will be responsible
+ * for actually aborting the underlying operation.
+ * To this purpose, the constructor and all chaining methods
+ * accept optional cancellation callbacks.
+ *
+ * If a `CancellablePromise` still resolves after having been cancelled,
+ * the result will be discarded. If it rejects, the reason
+ * will be reported as an unhandled rejection,
+ * wrapped in a {@link CancelledRejectionError} instance.
+ * To facilitate the handling of cancellation requests,
+ * cancelled `CancellablePromise`s will _not_ report unhandled `CancelError`s
+ * whose `cause` field is the same as the one with which the current promise was cancelled.
+ *
+ * All usual promise methods are defined and return a `CancellablePromise`
+ * whose cancel method will cancel the parent operation as well, propagating the cancellation reason
+ * upwards through promise chains.
+ * Conversely, cancelling a promise will not automatically cancel dependent promises downstream:
+ * ```ts
+ * let root = new CancellablePromise((resolve, reject) => { ... });
+ * let child1 = root.then(() => { ... });
+ * let child2 = child1.then(() => { ... });
+ * let child3 = root.catch(() => { ... });
+ * child1.cancel(); // Cancels child1 and root, but not child2 or child3
+ * ```
+ * Cancelling a promise that has already settled is safe and has no consequence.
+ *
+ * The `cancel` method returns a promise that _always fulfills_
+ * after the whole chain has processed the cancel request
+ * and all attached callbacks up to that moment have run.
+ *
+ * All ES2024 promise methods (static and instance) are defined on CancellablePromise,
+ * but actual availability may vary with OS/webview version.
+ *
+ * In line with the proposal at https://github.com/tc39/proposal-rm-builtin-subclassing,
+ * `CancellablePromise` does not support transparent subclassing.
+ * Extenders should take care to provide their own method implementations.
+ * This might be reconsidered in case the proposal is retired.
+ *
+ * CancellablePromise is a wrapper around the DOM Promise object
+ * and is compliant with the [Promises/A+ specification](https://promisesaplus.com/)
+ * (it passes the [compliance suite](https://github.com/promises-aplus/promises-tests))
+ * if so is the underlying implementation.
+ */
+class CancellablePromise extends Promise {
+    /**
+     * Creates a new `CancellablePromise`.
+     *
+     * @param executor - A callback used to initialize the promise. This callback is passed two arguments:
+     *                   a `resolve` callback used to resolve the promise with a value
+     *                   or the result of another promise (possibly cancellable),
+     *                   and a `reject` callback used to reject the promise with a provided reason or error.
+     *                   If the value provided to the `resolve` callback is a thenable _and_ cancellable object
+     *                   (it has a `then` _and_ a `cancel` method),
+     *                   cancellation requests will be forwarded to that object and the oncancelled will not be invoked anymore.
+     *                   If any one of the two callbacks is called _after_ the promise has been cancelled,
+     *                   the provided values will be cancelled and resolved as usual,
+     *                   but their results will be discarded.
+     *                   However, if the resolution process ultimately ends up in a rejection
+     *                   that is not due to cancellation, the rejection reason
+     *                   will be wrapped in a {@link CancelledRejectionError}
+     *                   and bubbled up as an unhandled rejection.
+     * @param oncancelled - It is the caller's responsibility to ensure that any operation
+     *                      started by the executor is properly halted upon cancellation.
+     *                      This optional callback can be used to that purpose.
+     *                      It will be called _synchronously_ with a cancellation cause
+     *                      when cancellation is requested, _after_ the promise has already rejected
+     *                      with a {@link CancelError}, but _before_
+     *                      any {@link then}/{@link catch}/{@link finally} callback runs.
+     *                      If the callback returns a thenable, the promise returned from {@link cancel}
+     *                      will only fulfill after the former has settled.
+     *                      Unhandled exceptions or rejections from the callback will be wrapped
+     *                      in a {@link CancelledRejectionError} and bubbled up as unhandled rejections.
+     *                      If the `resolve` callback is called before cancellation with a cancellable promise,
+     *                      cancellation requests on this promise will be diverted to that promise,
+     *                      and the original `oncancelled` callback will be discarded.
+     */
+    constructor(executor, oncancelled) {
+        let resolve;
+        let reject;
+        super((res, rej) => { resolve = res; reject = rej; });
+        if (this.constructor[species] !== Promise) {
+            throw new TypeError("CancellablePromise does not support transparent subclassing. Please refrain from overriding the [Symbol.species] static property.");
+        }
+        let promise = {
+            promise: this,
+            resolve,
+            reject,
+            get oncancelled() { return oncancelled !== null && oncancelled !== void 0 ? oncancelled : null; },
+            set oncancelled(cb) { oncancelled = cb !== null && cb !== void 0 ? cb : undefined; }
+        };
+        const state = {
+            get root() { return state; },
+            resolving: false,
+            settled: false
+        };
+        // Setup cancellation system.
+        void Object.defineProperties(this, {
+            [barrierSym]: {
+                configurable: false,
+                enumerable: false,
+                writable: true,
+                value: null
+            },
+            [cancelImplSym]: {
+                configurable: false,
+                enumerable: false,
+                writable: false,
+                value: cancellerFor(promise, state)
+            }
+        });
+        // Run the actual executor.
+        const rejector = rejectorFor(promise, state);
+        try {
+            executor(resolverFor(promise, state), rejector);
+        }
+        catch (err) {
+            if (state.resolving) {
+                console.log("Unhandled exception in CancellablePromise executor.", err);
+            }
+            else {
+                rejector(err);
+            }
+        }
+    }
+    /**
+     * Cancels immediately the execution of the operation associated with this promise.
+     * The promise rejects with a {@link CancelError} instance as reason,
+     * with the {@link CancelError#cause} property set to the given argument, if any.
+     *
+     * Has no effect if called after the promise has already settled;
+     * repeated calls in particular are safe, but only the first one
+     * will set the cancellation cause.
+     *
+     * The `CancelError` exception _need not_ be handled explicitly _on the promises that are being cancelled:_
+     * cancelling a promise with no attached rejection handler does not trigger an unhandled rejection event.
+     * Therefore, the following idioms are all equally correct:
+     * ```ts
+     * new CancellablePromise((resolve, reject) => { ... }).cancel();
+     * new CancellablePromise((resolve, reject) => { ... }).then(...).cancel();
+     * new CancellablePromise((resolve, reject) => { ... }).then(...).catch(...).cancel();
+     * ```
+     * Whenever some cancelled promise in a chain rejects with a `CancelError`
+     * with the same cancellation cause as itself, the error will be discarded silently.
+     * However, the `CancelError` _will still be delivered_ to all attached rejection handlers
+     * added by {@link then} and related methods:
+     * ```ts
+     * let cancellable = new CancellablePromise((resolve, reject) => { ... });
+     * cancellable.then(() => { ... }).catch(console.log);
+     * cancellable.cancel(); // A CancelError is printed to the console.
+     * ```
+     * If the `CancelError` is not handled downstream by the time it reaches
+     * a _non-cancelled_ promise, it _will_ trigger an unhandled rejection event,
+     * just like normal rejections would:
+     * ```ts
+     * let cancellable = new CancellablePromise((resolve, reject) => { ... });
+     * let chained = cancellable.then(() => { ... }).then(() => { ... }); // No catch...
+     * cancellable.cancel(); // Unhandled rejection event on chained!
+     * ```
+     * Therefore, it is important to either cancel whole promise chains from their tail,
+     * as shown in the correct idioms above, or take care of handling errors everywhere.
+     *
+     * @returns A cancellable promise that _fulfills_ after the cancel callback (if any)
+     * and all handlers attached up to the call to cancel have run.
+     * If the cancel callback returns a thenable, the promise returned by `cancel`
+     * will also wait for that thenable to settle.
+     * This enables callers to wait for the cancelled operation to terminate
+     * without being forced to handle potential errors at the call site.
+     * ```ts
+     * cancellable.cancel().then(() => {
+     *     // Cleanup finished, it's safe to do something else.
+     * }, (err) => {
+     *     // Unreachable: the promise returned from cancel will never reject.
+     * });
+     * ```
+     * Note that the returned promise will _not_ handle implicitly any rejection
+     * that might have occurred already in the cancelled chain.
+     * It will just track whether registered handlers have been executed or not.
+     * Therefore, unhandled rejections will never be silently handled by calling cancel.
+     */
+    cancel(cause) {
+        return new CancellablePromise((resolve) => {
+            // INVARIANT: the result of this[cancelImplSym] and the barrier do not ever reject.
+            // Unfortunately macOS High Sierra does not support Promise.allSettled.
+            Promise.all([
+                this[cancelImplSym](new CancelError("Promise cancelled.", { cause })),
+                currentBarrier(this)
+            ]).then(() => resolve(), () => resolve());
+        });
+    }
+    /**
+     * Binds promise cancellation to the abort event of the given {@link AbortSignal}.
+     * If the signal has already aborted, the promise will be cancelled immediately.
+     * When either condition is verified, the cancellation cause will be set
+     * to the signal's abort reason (see {@link AbortSignal#reason}).
+     *
+     * Has no effect if called (or if the signal aborts) _after_ the promise has already settled.
+     * Only the first signal to abort will set the cancellation cause.
+     *
+     * For more details about the cancellation process,
+     * see {@link cancel} and the `CancellablePromise` constructor.
+     *
+     * This method enables `await`ing cancellable promises without having
+     * to store them for future cancellation, e.g.:
+     * ```ts
+     * await longRunningOperation().cancelOn(signal);
+     * ```
+     * instead of:
+     * ```ts
+     * let promiseToBeCancelled = longRunningOperation();
+     * await promiseToBeCancelled;
+     * ```
+     *
+     * @returns This promise, for method chaining.
+     */
+    cancelOn(signal) {
+        if (signal.aborted) {
+            void this.cancel(signal.reason);
+        }
+        else {
+            signal.addEventListener('abort', () => void this.cancel(signal.reason), { capture: true });
+        }
+        return this;
+    }
+    /**
+     * Attaches callbacks for the resolution and/or rejection of the `CancellablePromise`.
+     *
+     * The optional `oncancelled` argument will be invoked when the returned promise is cancelled,
+     * with the same semantics as the `oncancelled` argument of the constructor.
+     * When the parent promise rejects or is cancelled, the `onrejected` callback will run,
+     * _even after the returned promise has been cancelled:_
+     * in that case, should it reject or throw, the reason will be wrapped
+     * in a {@link CancelledRejectionError} and bubbled up as an unhandled rejection.
+     *
+     * @param onfulfilled The callback to execute when the Promise is resolved.
+     * @param onrejected The callback to execute when the Promise is rejected.
+     * @returns A `CancellablePromise` for the completion of whichever callback is executed.
+     * The returned promise is hooked up to propagate cancellation requests up the chain, but not down:
+     *
+     *   - if the parent promise is cancelled, the `onrejected` handler will be invoked with a `CancelError`
+     *     and the returned promise _will resolve regularly_ with its result;
+     *   - conversely, if the returned promise is cancelled, _the parent promise is cancelled too;_
+     *     the `onrejected` handler will still be invoked with the parent's `CancelError`,
+     *     but its result will be discarded
+     *     and the returned promise will reject with a `CancelError` as well.
+     *
+     * The promise returned from {@link cancel} will fulfill only after all attached handlers
+     * up the entire promise chain have been run.
+     *
+     * If either callback returns a cancellable promise,
+     * cancellation requests will be diverted to it,
+     * and the specified `oncancelled` callback will be discarded.
+     */
+    then(onfulfilled, onrejected, oncancelled) {
+        if (!(this instanceof CancellablePromise)) {
+            throw new TypeError("CancellablePromise.prototype.then called on an invalid object.");
+        }
+        // NOTE: TypeScript's built-in type for then is broken,
+        // as it allows specifying an arbitrary TResult1 != T even when onfulfilled is not a function.
+        // We cannot fix it if we want to CancellablePromise to implement PromiseLike<T>.
+        if (!isCallable(onfulfilled)) {
+            onfulfilled = identity;
+        }
+        if (!isCallable(onrejected)) {
+            onrejected = thrower;
+        }
+        if (onfulfilled === identity && onrejected == thrower) {
+            // Shortcut for trivial arguments.
+            return new CancellablePromise((resolve) => resolve(this));
+        }
+        const barrier = {};
+        this[barrierSym] = barrier;
+        return new CancellablePromise((resolve, reject) => {
+            void super.then((value) => {
+                var _a;
+                if (this[barrierSym] === barrier) {
+                    this[barrierSym] = null;
+                }
+                (_a = barrier.resolve) === null || _a === void 0 ? void 0 : _a.call(barrier);
+                try {
+                    resolve(onfulfilled(value));
+                }
+                catch (err) {
+                    reject(err);
+                }
+            }, (reason) => {
+                var _a;
+                if (this[barrierSym] === barrier) {
+                    this[barrierSym] = null;
+                }
+                (_a = barrier.resolve) === null || _a === void 0 ? void 0 : _a.call(barrier);
+                try {
+                    resolve(onrejected(reason));
+                }
+                catch (err) {
+                    reject(err);
+                }
+            });
+        }, async (cause) => {
+            //cancelled = true;
+            try {
+                return oncancelled === null || oncancelled === void 0 ? void 0 : oncancelled(cause);
+            }
+            finally {
+                await this.cancel(cause);
+            }
+        });
+    }
+    /**
+     * Attaches a callback for only the rejection of the Promise.
+     *
+     * The optional `oncancelled` argument will be invoked when the returned promise is cancelled,
+     * with the same semantics as the `oncancelled` argument of the constructor.
+     * When the parent promise rejects or is cancelled, the `onrejected` callback will run,
+     * _even after the returned promise has been cancelled:_
+     * in that case, should it reject or throw, the reason will be wrapped
+     * in a {@link CancelledRejectionError} and bubbled up as an unhandled rejection.
+     *
+     * It is equivalent to
+     * ```ts
+     * cancellablePromise.then(undefined, onrejected, oncancelled);
+     * ```
+     * and the same caveats apply.
+     *
+     * @returns A Promise for the completion of the callback.
+     * Cancellation requests on the returned promise
+     * will propagate up the chain to the parent promise,
+     * but not in the other direction.
+     *
+     * The promise returned from {@link cancel} will fulfill only after all attached handlers
+     * up the entire promise chain have been run.
+     *
+     * If `onrejected` returns a cancellable promise,
+     * cancellation requests will be diverted to it,
+     * and the specified `oncancelled` callback will be discarded.
+     * See {@link then} for more details.
+     */
+    catch(onrejected, oncancelled) {
+        return this.then(undefined, onrejected, oncancelled);
+    }
+    /**
+     * Attaches a callback that is invoked when the CancellablePromise is settled (fulfilled or rejected). The
+     * resolved value cannot be accessed or modified from the callback.
+     * The returned promise will settle in the same state as the original one
+     * after the provided callback has completed execution,
+     * unless the callback throws or returns a rejecting promise,
+     * in which case the returned promise will reject as well.
+     *
+     * The optional `oncancelled` argument will be invoked when the returned promise is cancelled,
+     * with the same semantics as the `oncancelled` argument of the constructor.
+     * Once the parent promise settles, the `onfinally` callback will run,
+     * _even after the returned promise has been cancelled:_
+     * in that case, should it reject or throw, the reason will be wrapped
+     * in a {@link CancelledRejectionError} and bubbled up as an unhandled rejection.
+     *
+     * This method is implemented in terms of {@link then} and the same caveats apply.
+     * It is polyfilled, hence available in every OS/webview version.
+     *
+     * @returns A Promise for the completion of the callback.
+     * Cancellation requests on the returned promise
+     * will propagate up the chain to the parent promise,
+     * but not in the other direction.
+     *
+     * The promise returned from {@link cancel} will fulfill only after all attached handlers
+     * up the entire promise chain have been run.
+     *
+     * If `onfinally` returns a cancellable promise,
+     * cancellation requests will be diverted to it,
+     * and the specified `oncancelled` callback will be discarded.
+     * See {@link then} for more details.
+     */
+    finally(onfinally, oncancelled) {
+        if (!(this instanceof CancellablePromise)) {
+            throw new TypeError("CancellablePromise.prototype.finally called on an invalid object.");
+        }
+        if (!isCallable(onfinally)) {
+            return this.then(onfinally, onfinally, oncancelled);
+        }
+        return this.then((value) => CancellablePromise.resolve(onfinally()).then(() => value), (reason) => CancellablePromise.resolve(onfinally()).then(() => { throw reason; }), oncancelled);
+    }
+    /**
+     * We use the `[Symbol.species]` static property, if available,
+     * to disable the built-in automatic subclassing features from {@link Promise}.
+     * It is critical for performance reasons that extenders do not override this.
+     * Once the proposal at https://github.com/tc39/proposal-rm-builtin-subclassing
+     * is either accepted or retired, this implementation will have to be revised accordingly.
+     *
+     * @ignore
+     * @internal
+     */
+    static get [species]() {
+        return Promise;
+    }
+    static all(values) {
+        let collected = Array.from(values);
+        const promise = collected.length === 0
+            ? CancellablePromise.resolve(collected)
+            : new CancellablePromise((resolve, reject) => {
+                void Promise.all(collected).then(resolve, reject);
+            }, (cause) => cancelAll(promise, collected, cause));
+        return promise;
+    }
+    static allSettled(values) {
+        let collected = Array.from(values);
+        const promise = collected.length === 0
+            ? CancellablePromise.resolve(collected)
+            : new CancellablePromise((resolve, reject) => {
+                void Promise.allSettled(collected).then(resolve, reject);
+            }, (cause) => cancelAll(promise, collected, cause));
+        return promise;
+    }
+    static any(values) {
+        let collected = Array.from(values);
+        const promise = collected.length === 0
+            ? CancellablePromise.resolve(collected)
+            : new CancellablePromise((resolve, reject) => {
+                void Promise.any(collected).then(resolve, reject);
+            }, (cause) => cancelAll(promise, collected, cause));
+        return promise;
+    }
+    static race(values) {
+        let collected = Array.from(values);
+        const promise = new CancellablePromise((resolve, reject) => {
+            void Promise.race(collected).then(resolve, reject);
+        }, (cause) => cancelAll(promise, collected, cause));
+        return promise;
+    }
+    /**
+     * Creates a new cancelled CancellablePromise for the provided cause.
+     *
+     * @group Static Methods
+     */
+    static cancel(cause) {
+        const p = new CancellablePromise(() => { });
+        p.cancel(cause);
+        return p;
+    }
+    /**
+     * Creates a new CancellablePromise that cancels
+     * after the specified timeout, with the provided cause.
+     *
+     * If the {@link AbortSignal.timeout} factory method is available,
+     * it is used to base the timeout on _active_ time rather than _elapsed_ time.
+     * Otherwise, `timeout` falls back to {@link setTimeout}.
+     *
+     * @group Static Methods
+     */
+    static timeout(milliseconds, cause) {
+        const promise = new CancellablePromise(() => { });
+        if (AbortSignal && typeof AbortSignal === 'function' && AbortSignal.timeout && typeof AbortSignal.timeout === 'function') {
+            AbortSignal.timeout(milliseconds).addEventListener('abort', () => void promise.cancel(cause));
+        }
+        else {
+            setTimeout(() => void promise.cancel(cause), milliseconds);
+        }
+        return promise;
+    }
+    static sleep(milliseconds, value) {
+        return new CancellablePromise((resolve) => {
+            setTimeout(() => resolve(value), milliseconds);
+        });
+    }
+    /**
+     * Creates a new rejected CancellablePromise for the provided reason.
+     *
+     * @group Static Methods
+     */
+    static reject(reason) {
+        return new CancellablePromise((_, reject) => reject(reason));
+    }
+    static resolve(value) {
+        if (value instanceof CancellablePromise) {
+            // Optimise for cancellable promises.
+            return value;
+        }
+        return new CancellablePromise((resolve) => resolve(value));
+    }
+    /**
+     * Creates a new CancellablePromise and returns it in an object, along with its resolve and reject functions
+     * and a getter/setter for the cancellation callback.
+     *
+     * This method is polyfilled, hence available in every OS/webview version.
+     *
+     * @group Static Methods
+     */
+    static withResolvers() {
+        let result = { oncancelled: null };
+        result.promise = new CancellablePromise((resolve, reject) => {
+            result.resolve = resolve;
+            result.reject = reject;
+        }, (cause) => { var _a; (_a = result.oncancelled) === null || _a === void 0 ? void 0 : _a.call(result, cause); });
+        return result;
+    }
+}
+/**
+ * Returns a callback that implements the cancellation algorithm for the given cancellable promise.
+ * The promise returned from the resulting function does not reject.
+ */
+function cancellerFor(promise, state) {
+    let cancellationPromise = undefined;
+    return (reason) => {
+        if (!state.settled) {
+            state.settled = true;
+            state.reason = reason;
+            promise.reject(reason);
+            // Attach an error handler that ignores this specific rejection reason and nothing else.
+            // In theory, a sane underlying implementation at this point
+            // should always reject with our cancellation reason,
+            // hence the handler will never throw.
+            void Promise.prototype.then.call(promise.promise, undefined, (err) => {
+                if (err !== reason) {
+                    throw err;
+                }
+            });
+        }
+        // If reason is not set, the promise resolved regularly, hence we must not call oncancelled.
+        // If oncancelled is unset, no need to go any further.
+        if (!state.reason || !promise.oncancelled) {
+            return;
+        }
+        cancellationPromise = new Promise((resolve) => {
+            try {
+                resolve(promise.oncancelled(state.reason.cause));
+            }
+            catch (err) {
+                Promise.reject(new CancelledRejectionError(promise.promise, err, "Unhandled exception in oncancelled callback."));
+            }
+        }).catch((reason) => {
+            Promise.reject(new CancelledRejectionError(promise.promise, reason, "Unhandled rejection in oncancelled callback."));
+        });
+        // Unset oncancelled to prevent repeated calls.
+        promise.oncancelled = null;
+        return cancellationPromise;
+    };
+}
+/**
+ * Returns a callback that implements the resolution algorithm for the given cancellable promise.
+ */
+function resolverFor(promise, state) {
+    return (value) => {
+        if (state.resolving) {
+            return;
+        }
+        state.resolving = true;
+        if (value === promise.promise) {
+            if (state.settled) {
+                return;
+            }
+            state.settled = true;
+            promise.reject(new TypeError("A promise cannot be resolved with itself."));
+            return;
+        }
+        if (value != null && (typeof value === 'object' || typeof value === 'function')) {
+            let then;
+            try {
+                then = value.then;
+            }
+            catch (err) {
+                state.settled = true;
+                promise.reject(err);
+                return;
+            }
+            if (isCallable(then)) {
+                try {
+                    let cancel = value.cancel;
+                    if (isCallable(cancel)) {
+                        const oncancelled = (cause) => {
+                            Reflect.apply(cancel, value, [cause]);
+                        };
+                        if (state.reason) {
+                            // If already cancelled, propagate cancellation.
+                            // The promise returned from the canceller algorithm does not reject
+                            // so it can be discarded safely.
+                            void cancellerFor(Object.assign(Object.assign({}, promise), { oncancelled }), state)(state.reason);
+                        }
+                        else {
+                            promise.oncancelled = oncancelled;
+                        }
+                    }
+                }
+                catch (_a) { }
+                const newState = {
+                    root: state.root,
+                    resolving: false,
+                    get settled() { return this.root.settled; },
+                    set settled(value) { this.root.settled = value; },
+                    get reason() { return this.root.reason; }
+                };
+                const rejector = rejectorFor(promise, newState);
+                try {
+                    Reflect.apply(then, value, [resolverFor(promise, newState), rejector]);
+                }
+                catch (err) {
+                    rejector(err);
+                }
+                return; // IMPORTANT!
+            }
+        }
+        if (state.settled) {
+            return;
+        }
+        state.settled = true;
+        promise.resolve(value);
+    };
+}
+/**
+ * Returns a callback that implements the rejection algorithm for the given cancellable promise.
+ */
+function rejectorFor(promise, state) {
+    return (reason) => {
+        if (state.resolving) {
+            return;
+        }
+        state.resolving = true;
+        if (state.settled) {
+            try {
+                if (reason instanceof CancelError && state.reason instanceof CancelError && Object.is(reason.cause, state.reason.cause)) {
+                    // Swallow late rejections that are CancelErrors whose cancellation cause is the same as ours.
+                    return;
+                }
+            }
+            catch (_a) { }
+            void Promise.reject(new CancelledRejectionError(promise.promise, reason));
+        }
+        else {
+            state.settled = true;
+            promise.reject(reason);
+        }
+    };
+}
+/**
+ * Cancels all values in an array that look like cancellable thenables.
+ * Returns a promise that fulfills once all cancellation procedures for the given values have settled.
+ */
+function cancelAll(parent, values, cause) {
+    const results = [];
+    for (const value of values) {
+        let cancel;
+        try {
+            if (!isCallable(value.then)) {
+                continue;
+            }
+            cancel = value.cancel;
+            if (!isCallable(cancel)) {
+                continue;
+            }
+        }
+        catch (_a) {
+            continue;
+        }
+        let result;
+        try {
+            result = Reflect.apply(cancel, value, [cause]);
+        }
+        catch (err) {
+            Promise.reject(new CancelledRejectionError(parent, err, "Unhandled exception in cancel method."));
+            continue;
+        }
+        if (!result) {
+            continue;
+        }
+        results.push((result instanceof Promise ? result : Promise.resolve(result)).catch((reason) => {
+            Promise.reject(new CancelledRejectionError(parent, reason, "Unhandled rejection in cancel method."));
+        }));
+    }
+    return Promise.all(results);
+}
+/**
+ * Returns its argument.
+ */
+function identity(x) {
+    return x;
+}
+/**
+ * Throws its argument.
+ */
+function thrower(reason) {
+    throw reason;
+}
+/**
+ * Attempts various strategies to convert an error to a string.
+ */
+function errorMessage(err) {
+    try {
+        if (err instanceof Error || typeof err !== 'object' || err.toString !== Object.prototype.toString) {
+            return "" + err;
+        }
+    }
+    catch (_a) { }
+    try {
+        return JSON.stringify(err);
+    }
+    catch (_b) { }
+    try {
+        return Object.prototype.toString.call(err);
+    }
+    catch (_c) { }
+    return "<could not convert error to string>";
+}
+/**
+ * Gets the current barrier promise for the given cancellable promise. If necessary, initialises the barrier.
+ */
+function currentBarrier(promise) {
+    var _a;
+    let pwr = (_a = promise[barrierSym]) !== null && _a !== void 0 ? _a : {};
+    if (!('promise' in pwr)) {
+        Object.assign(pwr, promiseWithResolvers());
+    }
+    if (promise[barrierSym] == null) {
+        pwr.resolve();
+        promise[barrierSym] = pwr;
+    }
+    return pwr.promise;
+}
+// Polyfill Promise.withResolvers.
+let promiseWithResolvers = Promise.withResolvers;
+if (promiseWithResolvers && typeof promiseWithResolvers === 'function') {
+    promiseWithResolvers = promiseWithResolvers.bind(Promise);
+}
+else {
+    promiseWithResolvers = function () {
+        let resolve;
+        let reject;
+        const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+        return { promise, resolve, reject };
+    };
+}
+
+/*
+ _	   __	  _ __
+| |	 / /___ _(_) /____
+| | /| / / __ `/ / / ___/
+| |/ |/ / /_/ / / (__  )
+|__/|__/\__,_/_/_/____/
+The electron alternative for Go
+(c) Lea Anthony 2019-present
+*/
+// Setup
+window._wails = window._wails || {};
+const call = newRuntimeCaller(objectNames.Call);
+const cancelCall = newRuntimeCaller(objectNames.CancelCall);
+const callResponses = new Map();
+const CallBinding = 0;
+const CancelMethod = 0;
+/**
+ * Generates a unique ID using the nanoid library.
+ *
+ * @returns A unique ID that does not exist in the callResponses set.
+ */
+function generateID() {
+    let result;
+    do {
+        result = nanoid();
+    } while (callResponses.has(result));
+    return result;
+}
+/**
+ * Call a bound method according to the given call options.
+ *
+ * In case of failure, the returned promise will reject with an exception
+ * among ReferenceError (unknown method), TypeError (wrong argument count or type),
+ * {@link RuntimeError} (method returned an error), or other (network or internal errors).
+ * The exception might have a "cause" field with the value returned
+ * by the application- or service-level error marshaling functions.
+ *
+ * @param options - A method call descriptor.
+ * @returns The result of the call.
+ */
+function Call(options) {
+    const id = generateID();
+    const result = CancellablePromise.withResolvers();
+    callResponses.set(id, { resolve: result.resolve, reject: result.reject });
+    const request = call(CallBinding, Object.assign({ "call-id": id }, options));
+    let running = true;
+    request.then((res) => {
+        running = false;
+        callResponses.delete(id);
+        result.resolve(res);
+    }, (err) => {
+        running = false;
+        callResponses.delete(id);
+        result.reject(err);
+    });
+    const cancel = () => {
+        callResponses.delete(id);
+        return cancelCall(CancelMethod, { "call-id": id }).catch((err) => {
+            console.error("Error while requesting binding call cancellation:", err);
+        });
+    };
+    result.oncancelled = () => {
+        if (running) {
+            return cancel();
+        }
+        else {
+            return request.then(cancel);
+        }
+    };
+    return result.promise;
+}
+/**
+ * Calls a method by its numeric ID with the specified arguments.
+ * See {@link Call} for details.
+ *
+ * @param methodID - The ID of the method to call.
+ * @param args - The arguments to pass to the method.
+ * @return The result of the method call.
+ */
+function ByID(methodID, ...args) {
+    return Call({ methodID, args });
+}
+
+/*
+ _	   __	  _ __
+| |	 / /___ _(_) /____
+| | /| / / __ `/ / / ___/
+| |/ |/ / /_/ / / (__  )
+|__/|__/\__,_/_/_/____/
+The electron alternative for Go
+(c) Lea Anthony 2019-present
+*/
+/**
+ * Any is a dummy creation function for simple or unknown types.
+ */
+/**
+ * Maps known event names to creation functions for their data types.
+ * Will be monkey-patched by the binding generator.
+ */
+const Events = {};
+
+/*
+ _	   __	  _ __
+| |	 / /___ _(_) /____
+| | /| / / __ `/ / / ___/
+| |/ |/ / /_/ / / (__  )
+|__/|__/\__,_/_/_/____/
+The electron alternative for Go
+(c) Lea Anthony 2019-present
+*/
+// The following utilities have been factored out of ./events.ts
+// for testing purposes.
+const eventListeners = new Map();
+class Listener {
+    constructor(eventName, callback, maxCallbacks) {
+        this.eventName = eventName;
+        this.callback = callback;
+        this.maxCallbacks = maxCallbacks || -1;
+    }
+    dispatch(data) {
+        try {
+            this.callback(data);
+        }
+        catch (err) {
+            console.error(err);
+        }
+        if (this.maxCallbacks === -1)
+            return false;
+        this.maxCallbacks -= 1;
+        return this.maxCallbacks === 0;
+    }
+}
+function listenerOff(listener) {
+    let listeners = eventListeners.get(listener.eventName);
+    if (!listeners) {
+        return;
+    }
+    listeners = listeners.filter(l => l !== listener);
+    if (listeners.length === 0) {
+        eventListeners.delete(listener.eventName);
+    }
+    else {
+        eventListeners.set(listener.eventName, listeners);
+    }
+}
+
+/*
+ _	   __	  _ __
+| |	 / /___ _(_) /____
+| | /| / / __ `/ / / ___/
+| |/ |/ / /_/ / / (__  )
+|__/|__/\__,_/_/_/____/
+The electron alternative for Go
+(c) Lea Anthony 2019-present
+*/
+// Setup
+window._wails = window._wails || {};
+window._wails.dispatchWailsEvent = dispatchWailsEvent;
+newRuntimeCaller(objectNames.Events);
+/**
+ * Represents a system event or a custom event emitted through wails-provided facilities.
+ */
+class WailsEvent {
+    constructor(name, data) {
+        this.name = name;
+        this.data = data !== null && data !== void 0 ? data : null;
+    }
+}
+function dispatchWailsEvent(event) {
+    let listeners = eventListeners.get(event.name);
+    if (!listeners) {
+        return;
+    }
+    let wailsEvent = new WailsEvent(event.name, (event.name in Events) ? Events[event.name](event.data) : event.data);
+    if ('sender' in event) {
+        wailsEvent.sender = event.sender;
+    }
+    listeners = listeners.filter(listener => !listener.dispatch(wailsEvent));
+    if (listeners.length === 0) {
+        eventListeners.delete(event.name);
+    }
+    else {
+        eventListeners.set(event.name, listeners);
+    }
+}
+/**
+ * Register a callback function to be called multiple times for a specific event.
+ *
+ * @param eventName - The name of the event to register the callback for.
+ * @param callback - The callback function to be called when the event is triggered.
+ * @param maxCallbacks - The maximum number of times the callback can be called for the event. Once the maximum number is reached, the callback will no longer be called.
+ * @returns A function that, when called, will unregister the callback from the event.
+ */
+function OnMultiple(eventName, callback, maxCallbacks) {
+    let listeners = eventListeners.get(eventName) || [];
+    const thisListener = new Listener(eventName, callback, maxCallbacks);
+    listeners.push(thisListener);
+    eventListeners.set(eventName, listeners);
+    return () => listenerOff(thisListener);
+}
+/**
+ * Registers a callback function to be executed when the specified event occurs.
+ *
+ * @param eventName - The name of the event to register the callback for.
+ * @param callback - The callback function to be called when the event is triggered.
+ * @returns A function that, when called, will unregister the callback from the event.
+ */
+function On(eventName, callback) {
+    return OnMultiple(eventName, callback, -1);
 }
 
 /*
@@ -1900,8 +3227,201 @@ function loadOptionalScript(url) {
 // Load custom.js if available (used by server mode for WebSocket events, etc.)
 loadOptionalScript('/wails/custom.js');
 
+// @ts-check
+// Cynhyrchwyd y ffeil hon yn awtomatig. PEIDIWCH Â MODIWL
+// This file is automatically generated. DO NOT EDIT
+
+
+/**
+ * @returns {$CancellablePromise<void>}
+ */
+function ClearClipboard() {
+    return ByID(747885572);
+}
+
+/**
+ * @param {string} id
+ * @returns {$CancellablePromise<void>}
+ */
+function DeleteNote(id) {
+    return ByID(1615155726, id);
+}
+
+/**
+ * @param {string} name
+ * @returns {$CancellablePromise<string>}
+ */
+function GetClipData(name) {
+    return ByID(1261390009, name);
+}
+
+/**
+ * @returns {$CancellablePromise<string>}
+ */
+function GetNotes() {
+    return ByID(84666500);
+}
+
+/**
+ * @returns {$CancellablePromise<void>}
+ */
+function Quit() {
+    return ByID(3181047470);
+}
+
+/**
+ * @param {string} content
+ * @returns {$CancellablePromise<string>}
+ */
+function SaveNote(content) {
+    return ByID(717593036, content);
+}
+
+/**
+ * @param {string} hash
+ * @returns {$CancellablePromise<void>}
+ */
+function ToggleClipSecret(hash) {
+    return ByID(3964646531, hash);
+}
+
+/**
+ * @param {string} id
+ * @param {string} content
+ * @returns {$CancellablePromise<string>}
+ */
+function UpdateNote$1(id, content) {
+    return ByID(3719758856, id, content);
+}
+
+/**
+ * @returns {$CancellablePromise<void>}
+ */
+function WindowHide() {
+    return ByID(2361993597);
+}
+
+/**
+ * @returns {$CancellablePromise<void>}
+ */
+function WindowShow() {
+    return ByID(3381873996);
+}
+
+var _tmpl$$5 = /* @__PURE__ */ template(`<span class=shell-prompt-icon>$`), _tmpl$2$5 = /* @__PURE__ */ template(`<div class=shell-ghost aria-hidden=true><span class=ghost-typed></span><span class=ghost-suggestion>`), _tmpl$3$4 = /* @__PURE__ */ template(`<div class=search-bar><div class=search-input-wrap><input type=text autocomplete=off></div><button class=search-menu-btn title=Menu><svg width=16 height=16 viewBox="0 0 16 16"fill=currentColor><circle cx=8 cy=3 r=1.5></circle><circle cx=8 cy=8 r=1.5></circle><circle cx=8 cy=13 r=1.5>`), _tmpl$4$4 = /* @__PURE__ */ template(`<svg class=search-icon width=16 height=16 viewBox="0 0 16 16"fill=none stroke=currentColor stroke-width=1.6 stroke-linecap=round stroke-linejoin=round><circle cx=6.5 cy=6.5 r=4.5></circle><line x1=10.5 y1=10.5 x2=14 y2=14>`);
+function SearchBar(props) {
+  const ghostRemainder = () => {
+    const sug = props.suggestion || "";
+    const val = props.value || "";
+    if (!sug || !val) return "";
+    if (sug.toLowerCase().startsWith(val.toLowerCase())) return sug.slice(val.length);
+    return "";
+  };
+  return (() => {
+    var _el$ = _tmpl$3$4(), _el$3 = _el$.firstChild, _el$7 = _el$3.firstChild, _el$8 = _el$3.nextSibling;
+    insert(_el$, createComponent(Show, {
+      get when() {
+        return props.isShellMode;
+      },
+      get fallback() {
+        return _tmpl$4$4();
+      },
+      get children() {
+        return _tmpl$$5();
+      }
+    }), _el$3);
+    insert(_el$3, createComponent(Show, {
+      get when() {
+        return memo(() => !!props.isShellMode)() && ghostRemainder();
+      },
+      get children() {
+        var _el$4 = _tmpl$2$5(), _el$5 = _el$4.firstChild, _el$6 = _el$5.nextSibling;
+        insert(_el$5, () => props.value);
+        insert(_el$6, ghostRemainder);
+        return _el$4;
+      }
+    }), _el$7);
+    _el$7.$$input = (e) => props.onInput(e.target.value);
+    var _ref$ = props.ref;
+    typeof _ref$ === "function" ? use(_ref$, _el$7) : props.ref = _el$7;
+    setAttribute(_el$7, "spellcheck", false);
+    addEventListener(_el$8, "click", props.onMenuClick);
+    createRenderEffect((_p$) => {
+      var _v$ = "search-input" + (props.isShellMode ? " shell-input" : ""), _v$2 = props.placeholder || "Search...";
+      _v$ !== _p$.e && className(_el$7, _p$.e = _v$);
+      _v$2 !== _p$.t && setAttribute(_el$7, "placeholder", _p$.t = _v$2);
+      return _p$;
+    }, {
+      e: void 0,
+      t: void 0
+    });
+    createRenderEffect(() => _el$7.value = props.value);
+    return _el$;
+  })();
+}
 delegateEvents(["input", "click"]);
 
+var _tmpl$$4 = /* @__PURE__ */ template(`<svg class=eye-icon width=13 height=13 viewBox="0 0 24 24"fill=none stroke=currentColor stroke-width=2.2 stroke-linecap=round stroke-linejoin=round><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx=12 cy=12 r=3>`), _tmpl$2$4 = /* @__PURE__ */ template(`<svg class=eye-icon width=13 height=13 viewBox="0 0 24 24"fill=none stroke=currentColor stroke-width=2.2 stroke-linecap=round stroke-linejoin=round><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1=1 y1=1 x2=23 y2=23>`), _tmpl$3$3 = /* @__PURE__ */ template(`<div class=clip-empty>`), _tmpl$4$3 = /* @__PURE__ */ template(`<div class=clipboard-view><div class=clipboard-list>`), _tmpl$5$2 = /* @__PURE__ */ template(`<div><div></div><div class=clip-meta><span class=clip-type></span><div class=clip-meta-right><button class=clip-mask-btn></button><span class=clip-time>`);
+const IconEye = () => _tmpl$$4();
+const IconEyeSlash = () => _tmpl$2$4();
+function ClipboardView(props) {
+  return (() => {
+    var _el$3 = _tmpl$4$3(), _el$4 = _el$3.firstChild;
+    insert(_el$4, createComponent(For, {
+      get each() {
+        return props.filteredClipboardData;
+      },
+      children: (item, index) => (() => {
+        var _el$6 = _tmpl$5$2(), _el$7 = _el$6.firstChild, _el$8 = _el$7.nextSibling, _el$9 = _el$8.firstChild, _el$0 = _el$9.nextSibling, _el$1 = _el$0.firstChild, _el$10 = _el$1.nextSibling;
+        _el$6.$$click = () => props.onItemClick(item);
+        insert(_el$7, () => item.content || item.text || "No content");
+        insert(_el$9, () => item.type || "text");
+        _el$1.$$click = (e) => {
+          e.stopPropagation();
+          props.onToggleSecret(item);
+        };
+        insert(_el$1, createComponent(Show, {
+          get when() {
+            return item.is_secret;
+          },
+          get fallback() {
+            return createComponent(IconEye, {});
+          },
+          get children() {
+            return createComponent(IconEyeSlash, {});
+          }
+        }));
+        insert(_el$10, (() => {
+          var _c$ = memo(() => !!item.timestamp);
+          return () => _c$() ? new Date(item.timestamp * 1e3).toLocaleTimeString() : "";
+        })());
+        createRenderEffect((_p$) => {
+          var _v$ = `clipboard-item${index() === props.clipboardSelectedIndex ? " selected" : ""}`, _v$2 = `clip-text${item.is_secret ? " masked" : ""}`, _v$3 = item.is_secret ? "Reveal content" : "Mask content";
+          _v$ !== _p$.e && className(_el$6, _p$.e = _v$);
+          _v$2 !== _p$.t && className(_el$7, _p$.t = _v$2);
+          _v$3 !== _p$.a && setAttribute(_el$1, "title", _p$.a = _v$3);
+          return _p$;
+        }, {
+          e: void 0,
+          t: void 0,
+          a: void 0
+        });
+        return _el$6;
+      })()
+    }), null);
+    insert(_el$4, createComponent(Show, {
+      get when() {
+        return props.filteredClipboardData.length === 0;
+      },
+      get children() {
+        var _el$5 = _tmpl$3$3();
+        insert(_el$5, () => props.clipboardData.length > 0 ? "No matching items" : "Clipboard is empty");
+        return _el$5;
+      }
+    }), null);
+    return _el$3;
+  })();
+}
 delegateEvents(["click"]);
 
 /**
@@ -1981,6 +3501,7 @@ ${e}</tr>
 `}strong({tokens:e}){return `<strong>${this.parser.parseInline(e)}</strong>`}em({tokens:e}){return `<em>${this.parser.parseInline(e)}</em>`}codespan({text:e}){return `<code>${O(e,true)}</code>`}br(e){return "<br>"}del({tokens:e}){return `<del>${this.parser.parseInline(e)}</del>`}link({href:e,title:t,tokens:n}){let s=this.parser.parseInline(n),r=V(e);if(r===null)return s;e=r;let i='<a href="'+e+'"';return t&&(i+=' title="'+O(t)+'"'),i+=">"+s+"</a>",i}image({href:e,title:t,text:n,tokens:s}){s&&(n=this.parser.parseInline(s,this.parser.textRenderer));let r=V(e);if(r===null)return O(n);e=r;let i=`<img src="${e}" alt="${O(n)}"`;return t&&(i+=` title="${O(t)}"`),i+=">",i}text(e){return "tokens"in e&&e.tokens?this.parser.parseInline(e.tokens):"escaped"in e&&e.escaped?e.text:O(e.text)}};var L=class{strong({text:e}){return e}em({text:e}){return e}codespan({text:e}){return e}del({text:e}){return e}html({text:e}){return e}text({text:e}){return e}link({text:e}){return ""+e}image({text:e}){return ""+e}br(){return ""}checkbox({raw:e}){return e}};var b=class l{options;renderer;textRenderer;constructor(e){this.options=e||T,this.options.renderer=this.options.renderer||new y,this.renderer=this.options.renderer,this.renderer.options=this.options,this.renderer.parser=this,this.textRenderer=new L;}static parse(e,t){return new l(t).parse(e)}static parseInline(e,t){return new l(t).parseInline(e)}parse(e){this.renderer.parser=this;let t="";for(let n=0;n<e.length;n++){let s=e[n];if(this.options.extensions?.renderers?.[s.type]){let i=s,o=this.options.extensions.renderers[i.type].call({parser:this},i);if(o!==false||!["space","hr","heading","code","table","blockquote","list","html","def","paragraph","text"].includes(i.type)){t+=o||"";continue}}let r=s;switch(r.type){case "space":{t+=this.renderer.space(r);break}case "hr":{t+=this.renderer.hr(r);break}case "heading":{t+=this.renderer.heading(r);break}case "code":{t+=this.renderer.code(r);break}case "table":{t+=this.renderer.table(r);break}case "blockquote":{t+=this.renderer.blockquote(r);break}case "list":{t+=this.renderer.list(r);break}case "checkbox":{t+=this.renderer.checkbox(r);break}case "html":{t+=this.renderer.html(r);break}case "def":{t+=this.renderer.def(r);break}case "paragraph":{t+=this.renderer.paragraph(r);break}case "text":{t+=this.renderer.text(r);break}default:{let i='Token with "'+r.type+'" type was not found.';if(this.options.silent)return console.error(i),"";throw new Error(i)}}}return t}parseInline(e,t=this.renderer){this.renderer.parser=this;let n="";for(let s=0;s<e.length;s++){let r=e[s];if(this.options.extensions?.renderers?.[r.type]){let o=this.options.extensions.renderers[r.type].call({parser:this},r);if(o!==false||!["escape","html","link","image","strong","em","codespan","br","del","text"].includes(r.type)){n+=o||"";continue}}let i=r;switch(i.type){case "escape":{n+=t.text(i);break}case "html":{n+=t.html(i);break}case "link":{n+=t.link(i);break}case "image":{n+=t.image(i);break}case "checkbox":{n+=t.checkbox(i);break}case "strong":{n+=t.strong(i);break}case "em":{n+=t.em(i);break}case "codespan":{n+=t.codespan(i);break}case "br":{n+=t.br(i);break}case "del":{n+=t.del(i);break}case "text":{n+=t.text(i);break}default:{let o='Token with "'+i.type+'" type was not found.';if(this.options.silent)return console.error(o),"";throw new Error(o)}}}return n}};var P=class{options;block;constructor(e){this.options=e||T;}static passThroughHooks=new Set(["preprocess","postprocess","processAllTokens","emStrongMask"]);static passThroughHooksRespectAsync=new Set(["preprocess","postprocess","processAllTokens"]);preprocess(e){return e}postprocess(e){return e}processAllTokens(e){return e}emStrongMask(e){return e}provideLexer(e=this.block){return e?x.lex:x.lexInline}provideParser(e=this.block){return e?b.parse:b.parseInline}};var q=class{defaults=M();options=this.setOptions;parse=this.parseMarkdown(true);parseInline=this.parseMarkdown(false);Parser=b;Renderer=y;TextRenderer=L;Lexer=x;Tokenizer=w;Hooks=P;constructor(...e){this.use(...e);}walkTokens(e,t){let n=[];for(let s of e)switch(n=n.concat(t.call(this,s)),s.type){case "table":{let r=s;for(let i of r.header)n=n.concat(this.walkTokens(i.tokens,t));for(let i of r.rows)for(let o of i)n=n.concat(this.walkTokens(o.tokens,t));break}case "list":{let r=s;n=n.concat(this.walkTokens(r.items,t));break}default:{let r=s;this.defaults.extensions?.childTokens?.[r.type]?this.defaults.extensions.childTokens[r.type].forEach(i=>{let o=r[i].flat(1/0);n=n.concat(this.walkTokens(o,t));}):r.tokens&&(n=n.concat(this.walkTokens(r.tokens,t)));}}return n}use(...e){let t=this.defaults.extensions||{renderers:{},childTokens:{}};return e.forEach(n=>{let s={...n};if(s.async=this.defaults.async||s.async||false,n.extensions&&(n.extensions.forEach(r=>{if(!r.name)throw new Error("extension name required");if("renderer"in r){let i=t.renderers[r.name];i?t.renderers[r.name]=function(...o){let u=r.renderer.apply(this,o);return u===false&&(u=i.apply(this,o)),u}:t.renderers[r.name]=r.renderer;}if("tokenizer"in r){if(!r.level||r.level!=="block"&&r.level!=="inline")throw new Error("extension level must be 'block' or 'inline'");let i=t[r.level];i?i.unshift(r.tokenizer):t[r.level]=[r.tokenizer],r.start&&(r.level==="block"?t.startBlock?t.startBlock.push(r.start):t.startBlock=[r.start]:r.level==="inline"&&(t.startInline?t.startInline.push(r.start):t.startInline=[r.start]));}"childTokens"in r&&r.childTokens&&(t.childTokens[r.name]=r.childTokens);}),s.extensions=t),n.renderer){let r=this.defaults.renderer||new y(this.defaults);for(let i in n.renderer){if(!(i in r))throw new Error(`renderer '${i}' does not exist`);if(["options","parser"].includes(i))continue;let o=i,u=n.renderer[o],a=r[o];r[o]=(...c)=>{let p=u.apply(r,c);return p===false&&(p=a.apply(r,c)),p||""};}s.renderer=r;}if(n.tokenizer){let r=this.defaults.tokenizer||new w(this.defaults);for(let i in n.tokenizer){if(!(i in r))throw new Error(`tokenizer '${i}' does not exist`);if(["options","rules","lexer"].includes(i))continue;let o=i,u=n.tokenizer[o],a=r[o];r[o]=(...c)=>{let p=u.apply(r,c);return p===false&&(p=a.apply(r,c)),p};}s.tokenizer=r;}if(n.hooks){let r=this.defaults.hooks||new P;for(let i in n.hooks){if(!(i in r))throw new Error(`hook '${i}' does not exist`);if(["options","block"].includes(i))continue;let o=i,u=n.hooks[o],a=r[o];P.passThroughHooks.has(i)?r[o]=c=>{if(this.defaults.async&&P.passThroughHooksRespectAsync.has(i))return (async()=>{let k=await u.call(r,c);return a.call(r,k)})();let p=u.call(r,c);return a.call(r,p)}:r[o]=(...c)=>{if(this.defaults.async)return (async()=>{let k=await u.apply(r,c);return k===false&&(k=await a.apply(r,c)),k})();let p=u.apply(r,c);return p===false&&(p=a.apply(r,c)),p};}s.hooks=r;}if(n.walkTokens){let r=this.defaults.walkTokens,i=n.walkTokens;s.walkTokens=function(o){let u=[];return u.push(i.call(this,o)),r&&(u=u.concat(r.call(this,o))),u};}this.defaults={...this.defaults,...s};}),this}setOptions(e){return this.defaults={...this.defaults,...e},this}lexer(e,t){return x.lex(e,t??this.defaults)}parser(e,t){return b.parse(e,t??this.defaults)}parseMarkdown(e){return (n,s)=>{let r={...s},i={...this.defaults,...r},o=this.onError(!!i.silent,!!i.async);if(this.defaults.async===true&&r.async===false)return o(new Error("marked(): The async option was set to true by an extension. Remove async: false from the parse options object to return a Promise."));if(typeof n>"u"||n===null)return o(new Error("marked(): input parameter is undefined or null"));if(typeof n!="string")return o(new Error("marked(): input parameter is of type "+Object.prototype.toString.call(n)+", string expected"));if(i.hooks&&(i.hooks.options=i,i.hooks.block=e),i.async)return (async()=>{let u=i.hooks?await i.hooks.preprocess(n):n,c=await(i.hooks?await i.hooks.provideLexer(e):e?x.lex:x.lexInline)(u,i),p=i.hooks?await i.hooks.processAllTokens(c):c;i.walkTokens&&await Promise.all(this.walkTokens(p,i.walkTokens));let h=await(i.hooks?await i.hooks.provideParser(e):e?b.parse:b.parseInline)(p,i);return i.hooks?await i.hooks.postprocess(h):h})().catch(o);try{i.hooks&&(n=i.hooks.preprocess(n));let a=(i.hooks?i.hooks.provideLexer(e):e?x.lex:x.lexInline)(n,i);i.hooks&&(a=i.hooks.processAllTokens(a)),i.walkTokens&&this.walkTokens(a,i.walkTokens);let p=(i.hooks?i.hooks.provideParser(e):e?b.parse:b.parseInline)(a,i);return i.hooks&&(p=i.hooks.postprocess(p)),p}catch(u){return o(u)}}}onError(e,t){return n=>{if(n.message+=`
 Please report this to https://github.com/markedjs/marked.`,e){let s="<p>An error occurred:</p><pre>"+O(n.message+"",true)+"</pre>";return t?Promise.resolve(s):s}if(t)return Promise.reject(n);throw n}}};var z=new q;function g(l,e){return z.parse(l,e)}g.options=g.setOptions=function(l){return z.setOptions(l),g.defaults=z.defaults,N(g.defaults),g};g.getDefaults=M;g.defaults=T;g.use=function(...l){return z.use(...l),g.defaults=z.defaults,N(g.defaults),g};g.walkTokens=function(l,e){return z.walkTokens(l,e)};g.parseInline=z.parseInline;g.Parser=b;g.parser=b.parse;g.Renderer=y;g.TextRenderer=L;g.Lexer=x;g.lexer=x.lex;g.Tokenizer=w;g.Hooks=P;g.parse=g;g.options;g.setOptions;g.use;g.walkTokens;g.parseInline;b.parse;x.lex;
 
+var _tmpl$$3 = /* @__PURE__ */ template(`<div class=notes-empty><svg width=28 height=28 viewBox="0 0 28 28"fill=none stroke=currentColor stroke-width=1.3 stroke-linecap=round stroke-linejoin=round style=opacity:0.22;margin-bottom:8px><path d="M6 4h13a2 2 0 012 2v14l-5 5H6a2 2 0 01-2-2V6a2 2 0 012-2z"></path><line x1=9 y1=10 x2=17 y2=10></line><line x1=9 y1=14 x2=13 y2=14></line></svg><div class=notes-empty-sub>Click + to create one`), _tmpl$2$3 = /* @__PURE__ */ template(`<div class=notes-list>`), _tmpl$3$2 = /* @__PURE__ */ template(`<button class=notes-fab title="New note"><svg width=15 height=15 viewBox="0 0 15 15"fill=none stroke=currentColor stroke-width=2 stroke-linecap=round stroke-linejoin=round><path d="M11.5 1.5 L13.5 3.5 L5.5 11.5 L2 13 L3.5 9.5 Z"></path><line x1=9.5 y1=3.5 x2=11.5 y2=5.5>`), _tmpl$4$2 = /* @__PURE__ */ template(`<div class=notes-panel><div class=notes-panel-bar><button class=note-nav-btn><svg width=14 height=14 viewBox="0 0 14 14"fill=none stroke=currentColor stroke-width=1.8 stroke-linecap=round stroke-linejoin=round><polyline points="9,2 4,7 9,12"></polyline></svg>Back</button><div class=note-panel-meta><span class=note-row-date></span></div><div class=note-panel-actions><button class=note-action-btn><svg width=12 height=12 viewBox="0 0 12 12"fill=none stroke=currentColor stroke-width=1.7 stroke-linecap=round stroke-linejoin=round><path d="M8.5 1.5l2 2L3 11H1V9z"></path></svg>Edit</button><button class="note-action-btn danger"><svg width=12 height=12 viewBox="0 0 12 12"fill=none stroke=currentColor stroke-width=1.7 stroke-linecap=round><polyline points="1,3 11,3"></polyline><path d=M4,3V1.5h4V3></path><path d=M2,3l.7,7.5h6.6L10,3></path></svg>Delete</button></div></div><div class=notes-preview-body><div class=md-body>`), _tmpl$5$1 = /* @__PURE__ */ template(`<div class=notes-panel><div class=notes-panel-bar><button class=note-nav-btn><svg width=14 height=14 viewBox="0 0 14 14"fill=none stroke=currentColor stroke-width=1.8 stroke-linecap=round stroke-linejoin=round><polyline points="9,2 4,7 9,12"></polyline></svg>List</button><div class=note-panel-actions style=margin-left:auto><button class=notes-save-btn>Save ⌘↵</button></div></div><textarea class=notes-textarea placeholder="Write in markdown…">`), _tmpl$6$1 = /* @__PURE__ */ template(`<div class=notes-view>`), _tmpl$7$1 = /* @__PURE__ */ template(`<div class=note-row><div class=note-row-fileid></div><div class=note-row-preview></div><div class=note-row-top><span class=note-row-date></span><button class=note-row-del title=Delete><svg width=10 height=10 viewBox="0 0 10 10"fill=none stroke=currentColor stroke-width=1.8 stroke-linecap=round><line x1=1 y1=1 x2=9 y2=9></line><line x1=9 y1=1 x2=1 y2=9>`);
 g.use({
   renderer: {
     code({
@@ -1999,37 +3520,666 @@ g.use({
   gfm: true,
   breaks: true
 });
+function renderMarkdown(text) {
+  try {
+    return g.parse(text || "");
+  } catch {
+    return `<p>${text || ""}</p>`;
+  }
+}
+function fmtDate(iso) {
+  try {
+    return new Date(iso).toLocaleDateString(void 0, {
+      month: "short",
+      day: "numeric"
+    });
+  } catch {
+    return "";
+  }
+}
+function NotesView(props) {
+  const [view, setView] = createSignal("edit");
+  const [activeNote, setActiveNote] = createSignal(null);
+  const [editContent, setEditContent] = createSignal("");
+  let textareaRef;
+  const visibleNotes = createMemo(() => {
+    return props.notes;
+  });
+  const openPreview = (note) => {
+    setActiveNote(note);
+    setView("preview");
+  };
+  const openEdit = (note) => {
+    setActiveNote(note || null);
+    setEditContent(note?.content || "");
+    setView("edit");
+    setTimeout(() => textareaRef?.focus(), 30);
+  };
+  const goBack = () => {
+    if (view() === "preview") {
+      setView("list");
+      setActiveNote(null);
+      return;
+    }
+    if (view() === "edit") {
+      setView(activeNote() ? "preview" : "list");
+      return;
+    }
+  };
+  const handleSave = async () => {
+    const content = editContent().trim();
+    if (!content) return;
+    if (activeNote()) {
+      await UpdateNote(activeNote().id, content);
+    } else {
+      await props.onSave(content);
+    }
+    await props.onReload();
+    setView("list");
+    setActiveNote(null);
+  };
+  const handleDelete = async (id) => {
+    await props.onDelete(id);
+    await props.onReload();
+    setView("list");
+    setActiveNote(null);
+  };
+  const handleTextareaKey = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      handleSave();
+    }
+    if (e.key === "Escape") goBack();
+  };
+  return (() => {
+    var _el$ = _tmpl$6$1();
+    insert(_el$, createComponent(Show, {
+      get when() {
+        return view() === "list";
+      },
+      get children() {
+        return [(() => {
+          var _el$2 = _tmpl$2$3();
+          insert(_el$2, createComponent(Show, {
+            get when() {
+              return visibleNotes().length === 0;
+            },
+            get children() {
+              return _tmpl$$3();
+            }
+          }), null);
+          insert(_el$2, createComponent(For, {
+            get each() {
+              return visibleNotes();
+            },
+            children: (note) => {
+              const preview = (note.content || "").split("\n").find((l) => l.trim()) || "";
+              const clean = preview.replace(/^#+\s*/, "").replace(/[*_`]/g, "").slice(0, 72);
+              const fileId = note.id.split("_").join(" ");
+              return (() => {
+                var _el$19 = _tmpl$7$1(), _el$20 = _el$19.firstChild, _el$21 = _el$20.nextSibling, _el$22 = _el$21.nextSibling, _el$23 = _el$22.firstChild, _el$24 = _el$23.nextSibling;
+                _el$19.$$click = () => openPreview(note);
+                insert(_el$20, ` ${fileId}` || "(empty)");
+                insert(_el$21, ` ${clean}` || "(empty)");
+                insert(_el$23, () => fmtDate(note.createdAt));
+                _el$24.$$click = (e) => {
+                  e.stopPropagation();
+                  handleDelete(note.id);
+                };
+                return _el$19;
+              })();
+            }
+          }), null);
+          return _el$2;
+        })(), (() => {
+          var _el$4 = _tmpl$3$2();
+          _el$4.$$click = () => openEdit(null);
+          return _el$4;
+        })()];
+      }
+    }), null);
+    insert(_el$, createComponent(Show, {
+      get when() {
+        return view() === "preview";
+      },
+      get children() {
+        var _el$5 = _tmpl$4$2(), _el$6 = _el$5.firstChild, _el$7 = _el$6.firstChild, _el$8 = _el$7.nextSibling, _el$9 = _el$8.firstChild, _el$0 = _el$8.nextSibling, _el$1 = _el$0.firstChild, _el$10 = _el$1.nextSibling, _el$11 = _el$6.nextSibling, _el$12 = _el$11.firstChild;
+        _el$7.$$click = goBack;
+        insert(_el$9, () => fmtDate(activeNote()?.updatedAt || activeNote()?.createdAt));
+        _el$1.$$click = () => openEdit(activeNote());
+        _el$10.$$click = () => handleDelete(activeNote().id);
+        createRenderEffect(() => _el$12.innerHTML = renderMarkdown(activeNote()?.content || ""));
+        return _el$5;
+      }
+    }), null);
+    insert(_el$, createComponent(Show, {
+      get when() {
+        return view() === "edit";
+      },
+      get children() {
+        var _el$13 = _tmpl$5$1(), _el$14 = _el$13.firstChild, _el$15 = _el$14.firstChild, _el$16 = _el$15.nextSibling, _el$17 = _el$16.firstChild, _el$18 = _el$14.nextSibling;
+        _el$15.$$click = goBack;
+        _el$17.$$click = handleSave;
+        _el$18.$$keydown = handleTextareaKey;
+        _el$18.$$input = (e) => setEditContent(e.target.value);
+        var _ref$ = textareaRef;
+        typeof _ref$ === "function" ? use(_ref$, _el$18) : textareaRef = _el$18;
+        createRenderEffect(() => _el$17.disabled = !editContent().trim());
+        createRenderEffect(() => _el$18.value = editContent());
+        return _el$13;
+      }
+    }), null);
+    return _el$;
+  })();
+}
 delegateEvents(["click", "input", "keydown"]);
 
+var _tmpl$$2 = /* @__PURE__ */ template(`<div class=settings-overlay><div class=settings-panel><div class=settings-header><span class=settings-title>Settings</span><button class=settings-close title=Close><svg width=11 height=11 viewBox="0 0 11 11"fill=none stroke=currentColor stroke-width=2 stroke-linecap=round><line x1=1 y1=1 x2=10 y2=10></line><line x1=10 y1=1 x2=1 y2=10></line></svg></button></div><div class=settings-section><div class=settings-label>Notes folder</div><div class=settings-row><span class=settings-path></span><button class=settings-browse-btn>Browse…</button></div><div class=settings-hint>Markdown files are saved here, one per note.`);
+function SettingsView(props) {
+  const [notesDir, setNotesDir] = createSignal("");
+  onMount(async () => {
+    const dir = await GetNotesDir();
+    setNotesDir(dir);
+  });
+  const handleBrowse = async () => {
+    const newDir = await ChooseNotesDir();
+    setNotesDir(newDir);
+  };
+  return (() => {
+    var _el$ = _tmpl$$2(), _el$2 = _el$.firstChild, _el$3 = _el$2.firstChild, _el$4 = _el$3.firstChild, _el$5 = _el$4.nextSibling, _el$6 = _el$3.nextSibling, _el$7 = _el$6.firstChild, _el$8 = _el$7.nextSibling, _el$9 = _el$8.firstChild, _el$0 = _el$9.nextSibling;
+    addEventListener(_el$5, "click", props.onClose);
+    insert(_el$9, notesDir);
+    _el$0.$$click = handleBrowse;
+    return _el$;
+  })();
+}
 delegateEvents(["click"]);
 
+var _tmpl$$1 = /* @__PURE__ */ template(`<span>`), _tmpl$2$2 = /* @__PURE__ */ template(`<div class=status-bar><div class=status-hints>`), _tmpl$3$1 = /* @__PURE__ */ template(`<span class=status-hint> `);
+const TAB_HINTS = {
+  apps: [{
+    key: "↑↓",
+    label: "Navigate"
+  }, {
+    key: "↵",
+    label: "Open"
+  }, {
+    key: "Tab",
+    label: "Cycle"
+  }, {
+    key: "Esc",
+    label: "Quit"
+  }],
+  clipboard: [{
+    key: "↑↓",
+    label: "Navigate"
+  }, {
+    key: "↵",
+    label: "Copy"
+  }, {
+    key: "Tab",
+    label: "Cycle"
+  }, {
+    key: "Esc",
+    label: "Quit"
+  }],
+  notes: [{
+    key: "+",
+    label: "New"
+  }, {
+    key: "⌘↵",
+    label: "Save"
+  }, {
+    key: "Esc",
+    label: "Back"
+  }, {
+    key: "Tab",
+    label: "Cycle"
+  }],
+  shell: [{
+    key: "↑↓",
+    label: "History"
+  }, {
+    key: "→",
+    label: "Complete"
+  }, {
+    key: "↵",
+    label: "Run"
+  }, {
+    key: "Tab",
+    label: "Cycle"
+  }]
+};
+function StatusBar(props) {
+  const hints = () => TAB_HINTS[props.activeTab] || [];
+  return (() => {
+    var _el$ = _tmpl$2$2(), _el$2 = _el$.firstChild;
+    insert(_el$2, createComponent(For, {
+      get each() {
+        return hints();
+      },
+      children: (h) => (() => {
+        var _el$4 = _tmpl$3$1(), _el$5 = _el$4.firstChild;
+        insert(_el$4, () => h.key, _el$5);
+        insert(_el$4, () => h.label, null);
+        return _el$4;
+      })()
+    }));
+    insert(_el$, createComponent(Show, {
+      get when() {
+        return props.statusMsg;
+      },
+      get children() {
+        var _el$3 = _tmpl$$1();
+        insert(_el$3, () => props.statusMsg);
+        createRenderEffect(() => className(_el$3, "status-message " + (props.statusColor || "info")));
+        return _el$3;
+      }
+    }), null);
+    return _el$;
+  })();
+}
+
+var _tmpl$2$1 = /* @__PURE__ */ template(`<svg width=15 height=15 viewBox="0 0 15 15"fill=none stroke=currentColor stroke-width=1.4 stroke-linecap=round stroke-linejoin=round><rect x=3.5 y=2 width=8 height=11.5 rx=1.2></rect><path d="M5.5 2V3a1 1 0 001 1h2a1 1 0 001-1V2">`), _tmpl$4$1 = /* @__PURE__ */ template(`<svg width=15 height=15 viewBox="0 0 15 15"fill=none stroke=currentColor stroke-width=1.4 stroke-linecap=round stroke-linejoin=round><path d="M3 2h9a1 1 0 011 1v7.5L10.5 13H3a1 1 0 01-1-1V3a1 1 0 011-1z"></path><line x1=4.5 y1=5.5 x2=10.5 y2=5.5></line><line x1=4.5 y1=8 x2=8 y2=8>`), _tmpl$5 = /* @__PURE__ */ template(`<svg width=14 height=14 viewBox="0 0 14 14"fill=none stroke=currentColor stroke-width=1.4 stroke-linecap=round stroke-linejoin=round><circle cx=7 cy=7 r=2></circle><path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.93 2.93l1.06 1.06M10.01 10.01l1.06 1.06M2.93 11.07l1.06-1.06M10.01 3.99l1.06-1.06">`), _tmpl$6 = /* @__PURE__ */ template(`<svg width=13 height=13 viewBox="0 0 15 15"fill=none stroke=currentColor stroke-width=1.4 stroke-linecap=round stroke-linejoin=round><path d="M1.5 4.5h3v-3M13.5 10.5h-3v3"></path><path d="M12.4 4.5A5.5 5.5 0 004.2 2L1.5 4.5M13.5 10.5l-2.7 2.5a5.5 5.5 0 01-8.2-2.5">`), _tmpl$7 = /* @__PURE__ */ template(`<svg width=13 height=13 viewBox="0 0 15 15"fill=none stroke=currentColor stroke-width=1.4 stroke-linecap=round stroke-linejoin=round><path d="M2.5 3.5h10M4.5 3.5v-1a1 1 0 011-1h4a1 1 0 011 1v1M11.5 3.5v9a1 1 0 01-1 1h-6a1 1 0 01-1-1v-9"></path><line x1=6 y1=6 x2=6 y2=10></line><line x1=9 y1=6 x2=9 y2=10>`);
+const IconClipboard = () => _tmpl$2$1();
+const IconNotes = () => _tmpl$4$1();
+const IconSettings = () => _tmpl$5();
+const IconRefresh = () => _tmpl$6();
+const IconTrash = () => _tmpl$7();
+
+var _tmpl$ = /* @__PURE__ */ template(`<button class="menu-item danger"><span>Clear All`), _tmpl$2 = /* @__PURE__ */ template(`<button class=menu-item><span>Reload Notes`), _tmpl$3 = /* @__PURE__ */ template(`<div class="plugin-menu-panel floating-menu"><span class=plugin-menu-title></span><div class=menu-list>`), _tmpl$4 = /* @__PURE__ */ template(`<div class=app><div class=main-container><div class=search-section></div><div class=body-section><div class=sidebar><button title="Clipboard Ctrl+1"></button><button title="Notes Ctrl+2"></button><div class=sidebar-spacer></div><button title=Settings></button></div><div class=content-panel>`);
+const TABS = ["clipboard", "notes"];
+const SHELL_HISTORY_KEY = "rilaunch_shell_history";
+function loadShellHistory() {
+  try {
+    const raw = localStorage.getItem(SHELL_HISTORY_KEY);
+    return JSON.parse(raw || "[]");
+  } catch {
+    return [];
+  }
+}
 function App() {
-  const [activeTab] = createSignal("clipboard");
-  const [searchQuery] = createSignal("");
-  createSignal(0);
-  const [clipboardData] = createSignal([]);
-  createSignal(0);
-  const [notesList] = createSignal([]);
-  createSignal(false);
-  createSignal(false);
-  createSignal("");
-  createSignal("info");
-  createMemo(() => {
-    const term = searchQuery().toLowerCase();
+  const [activeTab, setActiveTab] = createSignal("clipboard");
+  const [searchQuery, setSearchQuery] = createSignal("");
+  const [selectedIndex, setSelectedIndex] = createSignal(0);
+  const [clipboardData, setClipboardData] = createSignal([]);
+  const [clipboardSelectedIndex, setClipboardSelectedIndex] = createSignal(0);
+  const [notesList, setNotesList] = createSignal([]);
+  const [showSettings, setShowSettings] = createSignal(false);
+  const [isMenuOpen, setIsMenuOpen] = createSignal(false);
+  const [statusMsg, setStatusMsg] = createSignal("");
+  const [statusColor, setStatusColor] = createSignal("info");
+  const [shellHistory] = createSignal(loadShellHistory());
+  let statusTimer;
+  let searchInputRef;
+  let clipboardLoadId = 0;
+  let notesLoadId = 0;
+  const showStatus = (msg, type = "info") => {
+    clearTimeout(statusTimer);
+    setStatusMsg(msg);
+    setStatusColor(type);
+    statusTimer = setTimeout(() => setStatusMsg(""), 2500);
+  };
+  const filteredClipboardData = createMemo(() => {
+    const term = searchQuery().trim().toLowerCase();
     if (!term) return clipboardData();
     return clipboardData().filter((item) => (item.content || item.text || "").toLowerCase().includes(term));
   });
-  createMemo(() => {
-    const term = searchQuery().toLowerCase();
+  const filteredNotes = createMemo(() => {
+    const term = searchQuery().trim().toLowerCase();
     if (!term) return notesList();
-    return notesList().filter((n) => n.content.toLowerCase().includes(term) || n.tag.toLowerCase().includes(term));
+    return notesList().filter((n) => {
+      const content = (n.content || "").toLowerCase();
+      const tag = (n.tag || "").toLowerCase();
+      return content.includes(term) || tag.includes(term);
+    });
   });
-  createMemo(() => {
+  const shellSuggestion = createMemo(() => {
     if (activeTab() !== "shell") return "";
     const q = searchQuery().trim();
     if (!q) return "";
     return shellHistory().find((h) => h.toLowerCase().startsWith(q.toLowerCase())) || "";
   });
+  const searchPlaceholder = () => {
+    switch (activeTab()) {
+      case "clipboard":
+        return "Filter clipboard...";
+      case "notes":
+        return "Search notes...";
+      default:
+        return "Search...";
+    }
+  };
+  const focusSearch = () => {
+    setTimeout(() => searchInputRef?.focus?.(), 30);
+  };
+  const switchTab = (tab) => {
+    const sameTab = activeTab() === tab;
+    setShowSettings(false);
+    setIsMenuOpen(false);
+    if (!sameTab) {
+      setActiveTab(tab);
+      setSearchQuery("");
+      setSelectedIndex(0);
+      setClipboardSelectedIndex(0);
+    }
+    if (tab === "clipboard") queueMicrotask(() => void loadClipboardData());
+    if (tab === "notes") queueMicrotask(() => void loadNotes());
+    focusSearch();
+  };
+  const loadClipboardData = async () => {
+    const requestId = ++clipboardLoadId;
+    try {
+      const raw = await GetClipData("");
+      if (requestId !== clipboardLoadId) return;
+      setClipboardData(JSON.parse(raw || "[]"));
+    } catch (e) {
+      console.error("Failed to load clipboard:", e);
+      if (requestId === clipboardLoadId) setClipboardData([]);
+    }
+  };
+  const loadNotes = async () => {
+    const requestId = ++notesLoadId;
+    try {
+      const raw = await GetNotes();
+      if (requestId !== notesLoadId) return;
+      setNotesList(JSON.parse(raw || "[]"));
+    } catch (e) {
+      console.error("Failed to load notes:", e);
+      if (requestId === notesLoadId) setNotesList([]);
+    }
+  };
+  const handleClipboardItemClick = async (item) => {
+    try {
+      await navigator.clipboard.writeText(item.content || item.text || "");
+      WindowHide();
+    } catch (e) {
+      console.error("Failed to copy clipboard item:", e);
+      showStatus("Failed to copy item", "error");
+    }
+  };
+  const handleToggleSecret = async (item) => {
+    try {
+      await ToggleClipSecret(item.hash);
+      setClipboardData((prev) => prev.map((x) => x.hash === item.hash ? {
+        ...x,
+        is_secret: !x.is_secret
+      } : x));
+    } catch (e) {
+      console.error("Failed to toggle secret:", e);
+      showStatus("Failed to update item", "error");
+    }
+  };
+  const handleClearClipboard = async () => {
+    if (!confirm("Are you sure you want to clear all clipboard items?")) return;
+    try {
+      await ClearClipboard();
+      setClipboardData([]);
+      setClipboardSelectedIndex(0);
+      showStatus("Clipboard cleared", "success");
+    } catch (e) {
+      console.error(e);
+      showStatus("Failed to clear clipboard", "error");
+    }
+  };
+  const handleReloadNotes = async () => {
+    await loadNotes();
+    showStatus("Notes reloaded", "success");
+  };
+  const handleSaveNote = async (content, tag) => {
+    try {
+      await SaveNote(content, tag);
+      await loadNotes();
+      showStatus("Note saved", "success");
+    } catch (e) {
+      console.error(e);
+      showStatus("Failed to save", "error");
+    }
+  };
+  const handleDeleteNote = async (id) => {
+    try {
+      await DeleteNote(id);
+      await loadNotes();
+      showStatus("Note deleted", "success");
+    } catch (e) {
+      console.error(e);
+      showStatus("Failed to delete", "error");
+    }
+  };
+  const handleUpdateNote = async (id, content, tag) => {
+    try {
+      await UpdateNote$1(id, content, tag);
+      await loadNotes();
+      showStatus("Note updated", "success");
+    } catch (e) {
+      console.error(e);
+      showStatus("Failed to update", "error");
+    }
+  };
+  const handleKeyDown = async (e) => {
+    if (e.key === "Escape") {
+      if (searchQuery() !== "") {
+        setSearchQuery("");
+        return;
+      }
+      Quit();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "Tab") {
+      e.preventDefault();
+      e.stopPropagation();
+      const cur = TABS.indexOf(activeTab());
+      const safeCur = cur >= 0 ? cur : 0;
+      const next = e.shiftKey ? (safeCur - 1 + TABS.length) % TABS.length : (safeCur + 1) % TABS.length;
+      switchTab(TABS[next]);
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && ["1", "2"].includes(e.key)) {
+      e.preventDefault();
+      switchTab(TABS[parseInt(e.key, 10) - 1]);
+      return;
+    }
+    if (showSettings()) return;
+    if (activeTab() === "notes") return;
+    if (activeTab() === "clipboard") {
+      const data = filteredClipboardData();
+      if (!data.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setClipboardSelectedIndex((i) => (i + 1) % data.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setClipboardSelectedIndex((i) => i === 0 ? data.length - 1 : i - 1);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const item = data[Math.min(clipboardSelectedIndex(), data.length - 1)];
+        if (item) await handleClipboardItemClick(item);
+      }
+    }
+  };
+  createEffect(() => {
+    searchQuery();
+    setSelectedIndex(0);
+    setClipboardSelectedIndex(0);
+  });
+  createEffect(() => {
+    const data = filteredClipboardData();
+    const idx = clipboardSelectedIndex();
+    if (!data.length && idx !== 0) {
+      setClipboardSelectedIndex(0);
+      return;
+    }
+    if (data.length && idx > data.length - 1) {
+      setClipboardSelectedIndex(data.length - 1);
+    }
+  });
+  onMount(() => {
+    document.addEventListener("keydown", handleKeyDown, true);
+    void loadClipboardData();
+    const offHotkey = On("Backend:GlobalHotkeyEvent", () => WindowShow());
+    const offClipboard = On("ClipboardUpdated", () => {
+      if (activeTab() === "clipboard") void loadClipboardData();
+    });
+    const onLauncherShow = () => {
+      requestAnimationFrame(() => {
+        document.body.classList.add("visible");
+        searchInputRef?.focus?.();
+      });
+    };
+    window.addEventListener("launcher:show", onLauncherShow);
+    searchInputRef?.focus?.();
+    onCleanup(() => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("launcher:show", onLauncherShow);
+      clearTimeout(statusTimer);
+      offHotkey?.();
+      offClipboard?.();
+    });
+  });
+  return (() => {
+    var _el$ = _tmpl$4(), _el$2 = _el$.firstChild, _el$3 = _el$2.firstChild, _el$1 = _el$3.nextSibling, _el$10 = _el$1.firstChild, _el$11 = _el$10.firstChild, _el$12 = _el$11.nextSibling, _el$13 = _el$12.nextSibling, _el$14 = _el$13.nextSibling, _el$15 = _el$10.nextSibling;
+    _el$.$$click = () => setIsMenuOpen(false);
+    insert(_el$3, createComponent(SearchBar, {
+      ref(r$) {
+        var _ref$ = searchInputRef;
+        typeof _ref$ === "function" ? _ref$(r$) : searchInputRef = r$;
+      },
+      get value() {
+        return searchQuery();
+      },
+      onInput: setSearchQuery,
+      get placeholder() {
+        return searchPlaceholder();
+      },
+      isShellMode: false,
+      get suggestion() {
+        return shellSuggestion();
+      },
+      onMenuClick: (e) => {
+        e.stopPropagation();
+        setIsMenuOpen((o) => !o);
+      }
+    }), null);
+    insert(_el$3, createComponent(Show, {
+      get when() {
+        return memo(() => !!isMenuOpen())() && !showSettings();
+      },
+      get children() {
+        var _el$4 = _tmpl$3(), _el$5 = _el$4.firstChild, _el$6 = _el$5.nextSibling;
+        _el$4.$$click = (e) => e.stopPropagation();
+        insert(_el$5, () => activeTab() === "clipboard" && "Clipboard", null);
+        insert(_el$5, () => activeTab() === "notes" && "Notes", null);
+        insert(_el$6, createComponent(Show, {
+          get when() {
+            return activeTab() === "clipboard";
+          },
+          get children() {
+            var _el$7 = _tmpl$(), _el$8 = _el$7.firstChild;
+            _el$7.$$click = () => {
+              setIsMenuOpen(false);
+              void handleClearClipboard();
+            };
+            insert(_el$7, createComponent(IconTrash, {}), _el$8);
+            return _el$7;
+          }
+        }), null);
+        insert(_el$6, createComponent(Show, {
+          get when() {
+            return activeTab() === "notes";
+          },
+          get children() {
+            var _el$9 = _tmpl$2(), _el$0 = _el$9.firstChild;
+            _el$9.$$click = () => {
+              setIsMenuOpen(false);
+              void handleReloadNotes();
+            };
+            insert(_el$9, createComponent(IconRefresh, {}), _el$0);
+            return _el$9;
+          }
+        }), null);
+        return _el$4;
+      }
+    }), null);
+    _el$11.$$click = () => switchTab("clipboard");
+    insert(_el$11, createComponent(IconClipboard, {}));
+    _el$12.$$click = () => switchTab("notes");
+    insert(_el$12, createComponent(IconNotes, {}));
+    _el$14.$$click = () => {
+      setIsMenuOpen(false);
+      setShowSettings((s) => !s);
+      focusSearch();
+    };
+    insert(_el$14, createComponent(IconSettings, {}));
+    insert(_el$15, createComponent(Show, {
+      get when() {
+        return showSettings();
+      },
+      get children() {
+        return createComponent(SettingsView, {
+          onClose: () => setShowSettings(false)
+        });
+      }
+    }), null);
+    insert(_el$15, createComponent(Show, {
+      get when() {
+        return memo(() => !!!showSettings())() && activeTab() === "clipboard";
+      },
+      get children() {
+        return createComponent(ClipboardView, {
+          get clipboardData() {
+            return clipboardData();
+          },
+          get filteredClipboardData() {
+            return filteredClipboardData();
+          },
+          get clipboardSelectedIndex() {
+            return clipboardSelectedIndex();
+          },
+          onItemClick: handleClipboardItemClick,
+          onToggleSecret: handleToggleSecret
+        });
+      }
+    }), null);
+    insert(_el$15, createComponent(Show, {
+      get when() {
+        return memo(() => !!!showSettings())() && activeTab() === "notes";
+      },
+      get children() {
+        return createComponent(NotesView, {
+          get notes() {
+            return filteredNotes();
+          },
+          onSave: handleSaveNote,
+          onUpdate: handleUpdateNote,
+          onDelete: handleDeleteNote,
+          onReload: loadNotes
+        });
+      }
+    }), null);
+    insert(_el$2, createComponent(StatusBar, {
+      get activeTab() {
+        return memo(() => !!showSettings())() ? "settings" : activeTab();
+      },
+      get statusMsg() {
+        return statusMsg();
+      },
+      get statusColor() {
+        return statusColor();
+      }
+    }), null);
+    createRenderEffect((_p$) => {
+      var _v$ = "tab-btn" + (activeTab() === "clipboard" && !showSettings() ? " active" : ""), _v$2 = "tab-btn" + (activeTab() === "notes" && !showSettings() ? " active" : ""), _v$3 = "tab-btn settings-btn" + (showSettings() ? " active" : "");
+      _v$ !== _p$.e && className(_el$11, _p$.e = _v$);
+      _v$2 !== _p$.t && className(_el$12, _p$.t = _v$2);
+      _v$3 !== _p$.a && className(_el$14, _p$.a = _v$3);
+      return _p$;
+    }, {
+      e: void 0,
+      t: void 0,
+      a: void 0
+    });
+    return _el$;
+  })();
 }
 delegateEvents(["click"]);
 

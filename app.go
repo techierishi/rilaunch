@@ -239,9 +239,9 @@ func registerHotkey(a *App) {
 		select {
 		case <-hk.Keyup():
 			if a.visible {
-				a.Hide()
+				a.WindowHide()
 			} else {
-				a.Show()
+				a.WindowShow()
 			}
 		}
 	}
@@ -274,13 +274,13 @@ func (a *App) makeWindow() *application.WebviewWindow {
 
 func (a *App) Toggle() {
 	if a.visible {
-		a.Hide()
+		a.WindowHide()
 		return
 	}
-	a.Show()
+	a.WindowShow()
 }
 
-func (a *App) Show() {
+func (a *App) WindowShow() {
 	if !a.ready || a.mainWindow == nil {
 		return
 	}
@@ -295,7 +295,7 @@ func (a *App) Show() {
 	a.mainWindow.Focus()
 }
 
-func (a *App) Hide() {
+func (a *App) WindowHide() {
 	if !a.ready || a.mainWindow == nil {
 		return
 	}
@@ -304,6 +304,12 @@ func (a *App) Hide() {
 	a.mainWindow.Hide()
 	if a.wailsApp != nil {
 		a.wailsApp.Event.Emit("Backend:GlobalHotkeyEvent", time.Now().String())
+	}
+}
+
+func (a *App) Quit() {
+	if a.wailsApp != nil {
+		a.wailsApp.Quit()
 	}
 }
 

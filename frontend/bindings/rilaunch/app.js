@@ -65,8 +65,8 @@ export function Greet(name) {
 /**
  * @returns {$CancellablePromise<void>}
  */
-export function Hide() {
-    return $Call.ByID(3538035797);
+export function Quit() {
+    return $Call.ByID(3181047470);
 }
 
 /**
@@ -103,13 +103,6 @@ export function SetMainWindow(window) {
 /**
  * @returns {$CancellablePromise<void>}
  */
-export function Show() {
-    return $Call.ByID(2781088484);
-}
-
-/**
- * @returns {$CancellablePromise<void>}
- */
 export function Toggle() {
     return $Call.ByID(1190013837);
 }
@@ -129,4 +122,18 @@ export function ToggleClipSecret(hash) {
  */
 export function UpdateNote(id, content) {
     return $Call.ByID(3719758856, id, content);
+}
+
+/**
+ * @returns {$CancellablePromise<void>}
+ */
+export function WindowHide() {
+    return $Call.ByID(2361993597);
+}
+
+/**
+ * @returns {$CancellablePromise<void>}
+ */
+export function WindowShow() {
+    return $Call.ByID(3381873996);
 }

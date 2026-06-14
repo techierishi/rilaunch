@@ -27,8 +27,8 @@ func main() {
 	app.SetApplication(wailsApp)
 	mainWindow := app.makeWindow()
 	app.SetMainWindow(mainWindow)
-	mainWindow.Show()
-	mainWindow.Hide()
+	app.WindowShow()
+	app.WindowHide()
 	app.ready = true
 	app.startup(context.Background())
 

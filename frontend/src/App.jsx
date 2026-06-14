@@ -16,7 +16,7 @@ import {
   DeleteNote,
   UpdateNote,
   WindowHide,
-  WindowShow,
+  // WindowShow,
   Quit
 } from "../bindings/rilaunch/app";
 

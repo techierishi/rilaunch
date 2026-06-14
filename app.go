@@ -227,7 +227,7 @@ func extractMacOSIconBase64(appPath string) string {
 
 func registerHotkey(a *App) {
 	hk := hotkey.New(
-		[]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModShift},
+		[]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModOption},
 		hotkey.KeySpace,
 	)
 
